@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const improvedDraft = [
-  "research-ratchet improves a draft through a measurable loop.",
+  "ralph-research improves a draft through a measurable loop.",
   "",
   "The loop defines a metric, runs one bounded experiment, and keeps the result only when the revision is verified to be better.",
   "",

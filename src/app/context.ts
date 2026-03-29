@@ -5,7 +5,7 @@ export interface AppContext {
 
 export function createAppContext(): AppContext {
   return {
-    appName: "research-ratchet",
+    appName: "ralph-research",
     phase: "scaffold",
   };
 }

@@ -1,8 +1,8 @@
-# research-ratchet
+# ralph-research
 
 Local-first runtime for recursive research improvement.
 
-`research-ratchet` runs a bounded improvement loop over a real artifact:
+`ralph-research` runs a bounded improvement loop over a real artifact:
 
 1. define a metric
 2. generate one candidate change
@@ -16,20 +16,20 @@ The v0.1 focus is a writing workflow that is runnable in under five minutes on a
 ### Zero-config demo
 
 ```bash
-npx research-ratchet demo writing
+npx ralph-research demo writing
 ```
 
-This creates a temporary writing repo, runs one accepted cycle, and prints the path plus the run id.
+This creates a temporary writing repo, runs one accepted cycle, and prints the path plus the run id. The v0.1 demo supports the bundled `writing` template only.
 
 ### Template flow
 
 ```bash
-npx research-ratchet init --template writing
-npx research-ratchet run --json
-npx research-ratchet inspect run-0001 --json
+npx ralph-research init --template writing
+npx ralph-research run --json
+npx ralph-research inspect run-0001 --json
 ```
 
-This path is the v0.1 success bar: `init -> run -> inspect` should work quickly and produce an acceptance reason you can inspect.
+This path is the v0.1 success bar: `init -> run -> inspect` should work quickly and produce an acceptance reason you can inspect. The bundled template set is currently `writing` only.
 
 ## Core Concepts
 
@@ -56,6 +56,7 @@ The default template uses a local command metric so the first run does not requi
 
 ```text
 rrx validate
+rrx doctor
 rrx init --template writing
 rrx demo writing
 rrx run
@@ -69,7 +70,7 @@ rrx serve-mcp --stdio
 
 ## MCP
 
-The bundled MCP server exposes three thin tools backed by the same service layer as the CLI:
+The bundled MCP server currently supports stdio transport and exposes three thin tools backed by the same service layer as the CLI:
 
 - `run_research_cycle`
 - `get_research_status`

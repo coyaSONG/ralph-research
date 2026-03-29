@@ -7,23 +7,23 @@ import * as z from "zod/v4";
 import { getProjectFrontier, getProjectStatus } from "../app/services/project-state-service.js";
 import { RunCycleService } from "../app/services/run-cycle-service.js";
 
-export interface ResearchRatchetMcpServerOptions {
+export interface RalphResearchMcpServerOptions {
   repoRoot?: string;
 }
 
-export function createResearchRatchetMcpServer(
-  options: ResearchRatchetMcpServerOptions = {},
+export function createRalphResearchMcpServer(
+  options: RalphResearchMcpServerOptions = {},
 ): McpServer {
   const defaultRepoRoot = resolve(options.repoRoot ?? process.cwd());
   const server = new McpServer({
-    name: "research-ratchet",
+    name: "ralph-research",
     version: "0.1.0",
   });
 
   server.registerTool(
     "run_research_cycle",
     {
-      description: "Run one or more research cycles using the shared research-ratchet service layer.",
+      description: "Run one or more research cycles using the shared ralph-research service layer.",
       inputSchema: {
         repoRoot: z.string().optional().describe("Repository root; defaults to the server working directory."),
         manifestPath: z.string().optional().describe("Optional path to the manifest file."),
@@ -124,9 +124,9 @@ export function createResearchRatchetMcpServer(
 }
 
 export async function startMcpServer(
-  options: ResearchRatchetMcpServerOptions = {},
+  options: RalphResearchMcpServerOptions = {},
 ): Promise<McpServer> {
-  const server = createResearchRatchetMcpServer(options);
+  const server = createRalphResearchMcpServer(options);
   const transport = new StdioServerTransport();
   await server.connect(transport);
   return server;

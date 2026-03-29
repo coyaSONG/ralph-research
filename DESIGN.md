@@ -1,7 +1,7 @@
-# research-ratchet — Design Document
+# ralph-research — Design Document
 
 ## 1. Vision & Positioning
-`research-ratchet` is a local-first runtime for recursive research improvement: define metrics, run search, keep only verified improvements.
+`ralph-research` is a local-first runtime for recursive research improvement: define metrics, run search, keep only verified improvements.
 
 - Core differentiator: this is not just an agent that "does research"; it is an execution layer that measures candidate quality, records provenance, and only preserves verified improvements.
 - Product wedge: open-source CLI with optional MCP exposure, designed for brownfield repos and local workflows.
@@ -56,7 +56,7 @@
 - `CLI`: primary execution surface for humans, local dev, CI, and scripting.
 - `MCP`: interoperability surface so external agents can invoke the same runtime through tools/resources.
 - `Skill`: thin agent-specific UX wrapper that teaches usage patterns but does not reimplement policy.
-- `Template`: onboarding layer for fast starts in common domains such as writing, code, and general research.
+- `Template`: onboarding layer for fast starts. The current bundled template set is `writing` only.
 
 ## 3. Core Concepts
 - `Manifest`: executable research spec declaring project type, proposer, experiment command, metrics, constraints, frontier, ratchet policy, and storage.
@@ -69,33 +69,26 @@
 ## 4. CLI Surface
 | Command | Purpose | Key Flags |
 |---|---|---|
-| `rrx init` | Create starter manifest, prompts, and scripts | `--template writing|code|general`, `--force`, `--from-last-run` |
-| `rrx validate` | Validate manifest and hooks | `--strict`, `--json` |
-| `rrx run` | Execute one or more research cycles | `--cycles`, `--budget`, `--auto-accept`, `--resume`, `--json` |
-| `rrx status` | Show current state, last run, and pending review items | `--watch`, `--json` |
-| `rrx frontier` | Show current best candidate or frontier set | `--all-metrics`, `--json` |
-| `rrx inspect <runId>` | Show run details, metrics, decision, logs, and judge trace | `--diff`, `--judge`, `--logs`, `--json` |
+| `rrx doctor` | Print scaffold status | none |
+| `rrx init` | Copy the starter template into the target directory | `--template <name>`, `--path`, `--force`, `--json` |
+| `rrx validate` | Validate the manifest file | `--path`, `--json` |
+| `rrx run` | Execute one or more research cycles | `--cycles`, `--resume`, `--json` |
+| `rrx status` | Show current state, latest run, and pending review items | `--path`, `--json` |
+| `rrx frontier` | Show current frontier entries | `--path`, `--json` |
+| `rrx inspect <runId>` | Show run details, metrics, and decision rationale | `--path`, `--json` |
 | `rrx accept <runId>` | Manually accept a pending candidate | `--note`, `--by` |
 | `rrx reject <runId>` | Manually reject a pending candidate | `--note`, `--by` |
-| `rrx serve-mcp` | Run the MCP server over stdio or TCP | `--stdio`, `--port`, `--project` |
-| `rrx demo` | Run a zero-config quickstart demo | `writing`, `code`, `--json` |
+| `rrx serve-mcp` | Run the minimal MCP server over stdio | `--stdio` |
+| `rrx demo writing` | Run the zero-config quickstart demo | `--path`, `--force`, `--json` |
 
 ## 5. MCP Surface
 ### Tools
 - `run_research_cycle`: run one or more cycles end-to-end, including proposal, execution, evaluation, and decision.
 - `get_research_status`: return current project status, last run, pending human gates, and summary.
 - `get_frontier`: return current best candidate or frontier entries.
-- `inspect_run`: return detailed information for a specific run.
-- `decide_candidate`: apply a manual accept/reject decision to a pending run.
-- `evaluate_candidate`: re-evaluate an existing candidate without reproposing.
-- `list_runs`: return recent run history.
 
-### Resources
-- `ralph://manifest`
-- `ralph://frontier`
-- `ralph://runs/{runId}`
-- `ralph://runs/{runId}/judge`
-- `ralph://decisions/{decisionId}`
+### Transport
+- v0.1 ships stdio only.
 
 ## 6. Key Design Decisions
 - The product core is `metric definition + experiment executor + ratchet policy + provenance log`.
@@ -120,12 +113,12 @@
 - Dogfooding is valuable but core engine changes should remain behind human review.
 - v0.1 distribution should prioritize `npm + npx`; Homebrew, Docker, and GitHub Actions can wait.
 - The key product difference is not “an agent that researches,” but “a local runtime that improves any artifact through measurable loops and keeps only verified gains.”
-- The working product name is `research-ratchet`, with CLI alias `rrx`.
+- The product name is `ralph-research`, with CLI alias `rrx`.
 
 ## 7. MVP Scope
 ### Included
 - TypeScript/Node package with shared service layer
-- `rrx validate`, `rrx run`, `rrx status`, `rrx frontier`
+- `rrx doctor`, `rrx validate`, `rrx init`, `rrx demo`, `rrx run`, `rrx status`, `rrx frontier`, `rrx inspect`, `rrx accept`, `rrx reject`
 - `single_best` frontier strategy
 - `epsilon_improve` ratchet
 - `approval_gate` ratchet
@@ -135,7 +128,7 @@
 - JSON-backed stores for runs, decisions, and frontier under `.ralph/`
 - git worktree-based candidate workspace
 - accepted candidate promotion with git commit
-- thin MCP server exposing core tools
+- thin MCP server exposing `run_research_cycle`, `get_research_status`, and `get_frontier` over stdio
 - `writing` template and zero-config demo mode
 
 ### Excluded
@@ -147,6 +140,8 @@
 - distributed execution
 - Homebrew, Docker, and GitHub Actions marketplace packaging
 - complex provider abstraction beyond minimal judge/proposer needs
+- additional bundled templates beyond `writing`
+- MCP resources and extra management tools beyond the three-tool server
 
 ## 8. Revised 14-Day Plan
 ### Day 1

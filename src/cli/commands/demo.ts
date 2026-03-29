@@ -129,7 +129,7 @@ export function registerDemoCommand(program: Command): void {
 
 async function initializeDemoRepo(repoRoot: string): Promise<void> {
   await execa("git", ["init"], { cwd: repoRoot });
-  await execa("git", ["config", "user.name", "research-ratchet demo"], { cwd: repoRoot });
+  await execa("git", ["config", "user.name", "ralph-research demo"], { cwd: repoRoot });
   await execa("git", ["config", "user.email", "demo@example.com"], { cwd: repoRoot });
   await execa("git", ["add", "."], { cwd: repoRoot });
   await execa("git", ["commit", "-m", "demo fixture"], { cwd: repoRoot });

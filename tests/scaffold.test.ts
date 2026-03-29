@@ -5,7 +5,7 @@ import { createAppContext } from "../src/app/context.js";
 describe("createAppContext", () => {
   it("returns the scaffold context", () => {
     expect(createAppContext()).toEqual({
-      appName: "research-ratchet",
+      appName: "ralph-research",
       phase: "scaffold",
     });
   });

@@ -11,7 +11,7 @@ import { GitWorktreeWorkspaceManager } from "../src/core/engine/workspace-manage
 let tempRoot = "";
 
 beforeEach(async () => {
-  tempRoot = await mkdtemp(join(tmpdir(), "research-ratchet-workspace-"));
+  tempRoot = await mkdtemp(join(tmpdir(), "ralph-research-workspace-"));
 });
 
 afterEach(async () => {
@@ -76,7 +76,7 @@ describe("GitWorktreeWorkspaceManager", () => {
 
     await writeFile(
       join(workspace.workspacePath, "draft.md"),
-      "Research-ratchet improves a draft through measurable iterations.\nJudges compare candidate changes against the baseline.\n",
+      "ralph-research improves a draft through measurable iterations.\nJudges compare candidate changes against the baseline.\n",
       "utf8",
     );
     await mkdir(join(workspace.workspacePath, "notes"), { recursive: true });
@@ -120,12 +120,12 @@ async function initTempGitRepo(): Promise<string> {
   await mkdir(repoRoot, { recursive: true });
 
   await execa("git", ["init"], { cwd: repoRoot });
-  await execa("git", ["config", "user.name", "Research Ratchet Tests"], { cwd: repoRoot });
+  await execa("git", ["config", "user.name", "Ralph Research Tests"], { cwd: repoRoot });
   await execa("git", ["config", "user.email", "tests@example.com"], { cwd: repoRoot });
 
   await writeFile(
     join(repoRoot, "draft.md"),
-    "Research-ratchet is a local runtime for recursive improvement.\nIt evaluates measurable changes before accepting them.\n",
+    "ralph-research is a local runtime for recursive improvement.\nIt evaluates measurable changes before accepting them.\n",
     "utf8",
   );
   await writeFile(join(repoRoot, "obsolete.md"), "remove me\n", "utf8");

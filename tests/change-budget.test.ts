@@ -10,7 +10,7 @@ import { evaluateChangeBudget } from "../src/core/engine/change-budget.js";
 let tempRoot = "";
 
 beforeEach(async () => {
-  tempRoot = await mkdtemp(join(tmpdir(), "research-ratchet-budget-"));
+  tempRoot = await mkdtemp(join(tmpdir(), "ralph-research-budget-"));
 });
 
 afterEach(async () => {
@@ -113,7 +113,7 @@ async function initTempGitRepo(): Promise<string> {
   await mkdir(join(repoRoot, "docs"), { recursive: true });
 
   await execa("git", ["init"], { cwd: repoRoot });
-  await execa("git", ["config", "user.name", "Research Ratchet Tests"], { cwd: repoRoot });
+  await execa("git", ["config", "user.name", "Ralph Research Tests"], { cwd: repoRoot });
   await execa("git", ["config", "user.email", "tests@example.com"], { cwd: repoRoot });
 
   await writeFile(join(repoRoot, "docs", "guide.md"), "Guide\n\nBaseline text.\n", "utf8");

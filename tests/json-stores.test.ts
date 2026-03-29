@@ -14,7 +14,7 @@ import type { RunRecord } from "../src/core/model/run-record.js";
 let tempRoot = "";
 
 beforeEach(async () => {
-  tempRoot = await mkdtemp(join(tmpdir(), "research-ratchet-stores-"));
+  tempRoot = await mkdtemp(join(tmpdir(), "ralph-research-stores-"));
 });
 
 afterEach(async () => {

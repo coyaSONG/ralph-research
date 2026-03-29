@@ -20,7 +20,7 @@ let tempRoot = "";
 let originalCwd = "";
 
 beforeEach(async () => {
-  tempRoot = await mkdtemp(join(tmpdir(), "research-ratchet-cli-"));
+  tempRoot = await mkdtemp(join(tmpdir(), "ralph-research-cli-"));
   originalCwd = process.cwd();
 });
 
@@ -233,7 +233,7 @@ async function initFixtureRepo(mode: "numeric" | "judge"): Promise<string> {
   await mkdir(join(repoRoot, "prompts"), { recursive: true });
 
   await execa("git", ["init"], { cwd: repoRoot });
-  await execa("git", ["config", "user.name", "Research Ratchet Tests"], { cwd: repoRoot });
+  await execa("git", ["config", "user.name", "Ralph Research Tests"], { cwd: repoRoot });
   await execa("git", ["config", "user.email", "tests@example.com"], { cwd: repoRoot });
 
   await writeFile(join(repoRoot, "docs", "draft.md"), "Baseline draft.\n", "utf8");

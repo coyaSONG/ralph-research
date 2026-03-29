@@ -14,7 +14,7 @@ import { RunCycleService } from "../src/app/services/run-cycle-service.js";
 let tempRoot = "";
 
 beforeEach(async () => {
-  tempRoot = await mkdtemp(join(tmpdir(), "research-ratchet-service-"));
+  tempRoot = await mkdtemp(join(tmpdir(), "ralph-research-service-"));
 });
 
 afterEach(async () => {
@@ -247,7 +247,7 @@ async function initFixtureRepo(mode: "numeric" | "judge" | "graduation" | "histo
   await mkdir(join(repoRoot, "prompts"), { recursive: true });
 
   await execa("git", ["init"], { cwd: repoRoot });
-  await execa("git", ["config", "user.name", "Research Ratchet Tests"], { cwd: repoRoot });
+  await execa("git", ["config", "user.name", "Ralph Research Tests"], { cwd: repoRoot });
   await execa("git", ["config", "user.email", "tests@example.com"], { cwd: repoRoot });
 
   await writeFile(join(repoRoot, "docs", "draft.md"), "Baseline draft.\n", "utf8");

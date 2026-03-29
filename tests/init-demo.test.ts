@@ -12,7 +12,7 @@ import { runInitCommand } from "../src/cli/commands/init.js";
 let tempRoot = "";
 
 beforeEach(async () => {
-  tempRoot = await mkdtemp(join(tmpdir(), "research-ratchet-init-demo-"));
+  tempRoot = await mkdtemp(join(tmpdir(), "ralph-research-init-demo-"));
 });
 
 afterEach(async () => {

@@ -74,7 +74,7 @@ export async function runValidateCommand(
 export function registerValidateCommand(program: Command): void {
   program
     .command("validate")
-    .description("Validate a research-ratchet manifest.")
+    .description("Validate a ralph-research manifest.")
     .option("-p, --path <path>", "Path to the manifest file", DEFAULT_MANIFEST_FILENAME)
     .option("--json", "Emit machine-readable output", false)
     .action(async (options: ValidateCommandOptions) => {

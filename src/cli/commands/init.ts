@@ -117,7 +117,7 @@ async function hasGitHead(repoRoot: string): Promise<boolean> {
 async function ensureGitIdentity(repoRoot: string): Promise<void> {
   const name = await readGitConfig(repoRoot, "user.name");
   if (!name) {
-    await execa("git", ["config", "user.name", "research-ratchet"], { cwd: repoRoot });
+    await execa("git", ["config", "user.name", "ralph-research"], { cwd: repoRoot });
   }
 
   const email = await readGitConfig(repoRoot, "user.email");

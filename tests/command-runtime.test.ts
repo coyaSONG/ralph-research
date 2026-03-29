@@ -11,7 +11,7 @@ import { runExperiment } from "../src/core/engine/experiment-runner.js";
 let tempRoot = "";
 
 beforeEach(async () => {
-  tempRoot = await mkdtemp(join(tmpdir(), "research-ratchet-command-"));
+  tempRoot = await mkdtemp(join(tmpdir(), "ralph-research-command-"));
 });
 
 afterEach(async () => {
