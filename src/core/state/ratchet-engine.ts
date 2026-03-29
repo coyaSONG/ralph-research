@@ -7,8 +7,16 @@ export interface RatchetDecision {
   outcome: "accepted" | "rejected" | "needs_human";
   frontierChanged: boolean;
   metricId: string;
+  policyType: RatchetConfig["type"];
   reason: string;
   delta?: number;
+  graduation?: {
+    activatedPolicy: "epsilon_improve";
+    consecutiveAccepts: number;
+    epsilon: number;
+    effectiveNextCycle: true;
+    reason: string;
+  };
 }
 
 export interface RatchetInput {
@@ -17,6 +25,7 @@ export interface RatchetInput {
   candidateMetrics: Record<string, MetricResult>;
   currentFrontier: FrontierEntry[];
   constraintFailureReason?: string;
+  priorConsecutiveAccepts?: number;
 }
 
 export function evaluateRatchet(input: RatchetInput): RatchetDecision {
@@ -25,6 +34,7 @@ export function evaluateRatchet(input: RatchetInput): RatchetDecision {
       outcome: "rejected",
       frontierChanged: false,
       metricId: input.ratchet.metric ?? input.primaryMetric,
+      policyType: input.ratchet.type,
       reason: input.constraintFailureReason,
     };
   }
@@ -32,12 +42,34 @@ export function evaluateRatchet(input: RatchetInput): RatchetDecision {
   const metricId = input.ratchet.metric ?? input.primaryMetric;
   const candidateMetric = getCandidateMetric(input.candidateMetrics, metricId);
   const incumbentMetric = input.currentFrontier[0]?.metrics[metricId];
+  const priorConsecutiveAccepts = input.priorConsecutiveAccepts ?? 0;
 
   if (input.ratchet.type === "epsilon_improve") {
     return evaluateEpsilonImprove(metricId, input.ratchet.epsilon, candidateMetric, incumbentMetric);
   }
 
-  return evaluateApprovalGate(metricId, input.ratchet.minConfidence, candidateMetric, incumbentMetric);
+  if (input.ratchet.graduation && priorConsecutiveAccepts >= input.ratchet.graduation.consecutiveAccepts) {
+    const graduatedDecision = evaluateEpsilonImprove(
+      metricId,
+      input.ratchet.graduation.epsilon,
+      candidateMetric,
+      incumbentMetric,
+    );
+
+    return {
+      ...graduatedDecision,
+      reason: `graduated autonomy active after ${priorConsecutiveAccepts} consecutive accepts; ${graduatedDecision.reason}`,
+    };
+  }
+
+  return evaluateApprovalGate(
+    metricId,
+    input.ratchet.minConfidence,
+    candidateMetric,
+    incumbentMetric,
+    input.ratchet.graduation,
+    priorConsecutiveAccepts,
+  );
 }
 
 function evaluateEpsilonImprove(
@@ -51,6 +83,7 @@ function evaluateEpsilonImprove(
       outcome: "accepted",
       frontierChanged: true,
       metricId,
+      policyType: "epsilon_improve",
       reason: `frontier empty; candidate accepted on metric ${metricId}`,
     };
   }
@@ -61,6 +94,7 @@ function evaluateEpsilonImprove(
       outcome: "accepted",
       frontierChanged: true,
       metricId,
+      policyType: "epsilon_improve",
       delta,
       reason: `${buildMetricComparisonReason(metricId, candidateMetric, incumbentMetric, delta, "improved")}; epsilon=${epsilon}`,
     };
@@ -70,6 +104,7 @@ function evaluateEpsilonImprove(
     outcome: "rejected",
     frontierChanged: false,
     metricId,
+    policyType: "epsilon_improve",
     delta,
     reason: `${buildMetricComparisonReason(metricId, candidateMetric, incumbentMetric, delta, "not_improved")}; epsilon=${epsilon}`,
   };
@@ -80,6 +115,11 @@ function evaluateApprovalGate(
   minConfidence: number,
   candidateMetric: MetricResult,
   incumbentMetric?: MetricResult,
+  graduation?: {
+    consecutiveAccepts: number;
+    epsilon: number;
+  },
+  priorConsecutiveAccepts = 0,
 ): RatchetDecision {
   const confidence = candidateMetric.confidence;
 
@@ -89,6 +129,7 @@ function evaluateApprovalGate(
         outcome: "needs_human",
         frontierChanged: false,
         metricId,
+        policyType: "approval_gate",
         reason: `frontier empty on metric ${metricId}, but candidate confidence is missing`,
       };
     }
@@ -98,6 +139,7 @@ function evaluateApprovalGate(
         outcome: "needs_human",
         frontierChanged: false,
         metricId,
+        policyType: "approval_gate",
         reason: `frontier empty on metric ${metricId}, but confidence ${confidence.toFixed(2)} is below threshold ${minConfidence.toFixed(2)}`,
       };
     }
@@ -106,7 +148,13 @@ function evaluateApprovalGate(
       outcome: "accepted",
       frontierChanged: true,
       metricId,
+      policyType: "approval_gate",
       reason: `frontier empty; candidate accepted on metric ${metricId} with confidence ${confidence.toFixed(2)}`,
+      ...(graduation && priorConsecutiveAccepts + 1 >= graduation.consecutiveAccepts
+        ? {
+            graduation: buildGraduationEvent(metricId, graduation, priorConsecutiveAccepts + 1),
+          }
+        : {}),
     };
   }
 
@@ -116,6 +164,7 @@ function evaluateApprovalGate(
       outcome: "rejected",
       frontierChanged: false,
       metricId,
+      policyType: "approval_gate",
       delta,
       reason: buildMetricComparisonReason(metricId, candidateMetric, incumbentMetric, delta, "not_improved"),
     };
@@ -126,6 +175,7 @@ function evaluateApprovalGate(
       outcome: "needs_human",
       frontierChanged: false,
       metricId,
+      policyType: "approval_gate",
       delta,
       reason: `${buildMetricComparisonReason(metricId, candidateMetric, incumbentMetric, delta, "improved")}; confidence missing`,
     };
@@ -136,6 +186,7 @@ function evaluateApprovalGate(
       outcome: "needs_human",
       frontierChanged: false,
       metricId,
+      policyType: "approval_gate",
       delta,
       reason: `${buildMetricComparisonReason(metricId, candidateMetric, incumbentMetric, delta, "improved")}; confidence ${confidence.toFixed(2)} below threshold ${minConfidence.toFixed(2)}`,
     };
@@ -145,8 +196,31 @@ function evaluateApprovalGate(
     outcome: "accepted",
     frontierChanged: true,
     metricId,
+    policyType: "approval_gate",
     delta,
     reason: `${buildMetricComparisonReason(metricId, candidateMetric, incumbentMetric, delta, "improved")}; confidence ${confidence.toFixed(2)} passed threshold ${minConfidence.toFixed(2)}`,
+    ...(graduation && priorConsecutiveAccepts + 1 >= graduation.consecutiveAccepts
+      ? {
+          graduation: buildGraduationEvent(metricId, graduation, priorConsecutiveAccepts + 1),
+        }
+      : {}),
+  };
+}
+
+function buildGraduationEvent(
+  metricId: string,
+  graduation: {
+    consecutiveAccepts: number;
+    epsilon: number;
+  },
+  consecutiveAccepts: number,
+): NonNullable<RatchetDecision["graduation"]> {
+  return {
+    activatedPolicy: "epsilon_improve",
+    consecutiveAccepts,
+    epsilon: graduation.epsilon,
+    effectiveNextCycle: true,
+    reason: `graduated autonomy unlocked for metric ${metricId} after ${consecutiveAccepts} consecutive accepts`,
   };
 }
 

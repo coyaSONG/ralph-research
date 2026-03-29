@@ -8,6 +8,7 @@ import {
   DEFAULT_MAX_FILES_CHANGED,
   DEFAULT_MAX_LINE_DELTA,
   DEFAULT_MAX_PATCH_COUNT,
+  DEFAULT_PROPOSER_HISTORY_MAX_RUNS,
   DEFAULT_PROPOSER_EXPLORATION_RATIO,
   DEFAULT_PROJECT_BASELINE_REF,
   DEFAULT_PROJECT_WORKSPACE,
@@ -39,9 +40,15 @@ export const projectSchema = z.object({
   workspace: z.enum(["git", "copy"]).default(DEFAULT_PROJECT_WORKSPACE),
 });
 
+export const proposerHistorySchema = z.object({
+  enabled: z.boolean().default(false),
+  maxRuns: z.number().int().min(1).default(DEFAULT_PROPOSER_HISTORY_MAX_RUNS),
+});
+
 export const commandProposerSchema = z.object({
   type: z.literal("command"),
   ...commandSpecSchema.shape,
+  history: proposerHistorySchema.default(manifestDefaults.proposer.history),
 });
 
 export const operatorLlmProposerSchema = z.object({
@@ -52,6 +59,7 @@ export const operatorLlmProposerSchema = z.object({
   explorationRatio: z.number().min(0).max(1).default(DEFAULT_PROPOSER_EXPLORATION_RATIO),
   stagnationAfterRejections: z.number().int().min(1).default(DEFAULT_STAGNATION_AFTER_REJECTIONS),
   maxPatchCount: z.number().int().min(1).default(DEFAULT_MAX_PATCH_COUNT),
+  history: proposerHistorySchema.default(manifestDefaults.proposer.history),
 });
 
 export const proposerSchema = z.discriminatedUnion("type", [
@@ -189,6 +197,12 @@ export const approvalGateRatchetSchema = z.object({
   type: z.literal("approval_gate"),
   metric: z.string().min(1).optional(),
   minConfidence: z.number().min(0).max(1).default(DEFAULT_LOW_CONFIDENCE_THRESHOLD),
+  graduation: z
+    .object({
+      consecutiveAccepts: z.number().int().min(1),
+      epsilon: z.number().default(0),
+    })
+    .optional(),
 });
 
 export const ratchetSchema = z.discriminatedUnion("type", [
@@ -268,5 +282,6 @@ export type CommandMetricExtractorConfig = z.infer<typeof commandMetricExtractor
 export type CommandSpecConfig = z.infer<typeof commandSpecSchema>;
 export type ScopeConfig = z.infer<typeof scopeSchema>;
 export type LlmJudgeMetricExtractorConfig = z.infer<typeof llmJudgeMetricExtractorSchema>;
+export type ProposerHistoryConfig = z.infer<typeof proposerHistorySchema>;
 
 export { DEFAULT_MANIFEST_FILENAME };

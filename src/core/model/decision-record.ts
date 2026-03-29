@@ -18,6 +18,15 @@ export const decisionRecordSchema = z.object({
   afterFrontierIds: z.array(z.string().min(1)).default([]),
   commitSha: z.string().min(1).optional(),
   auditRequired: z.boolean().default(false),
+  graduation: z
+    .object({
+      activatedPolicy: z.literal("epsilon_improve"),
+      consecutiveAccepts: z.number().int().min(1),
+      epsilon: z.number(),
+      effectiveNextCycle: z.boolean().default(true),
+      reason: z.string().min(1),
+    })
+    .optional(),
 });
 
 export type DecisionRecord = z.infer<typeof decisionRecordSchema>;

@@ -149,9 +149,82 @@ describe("RunCycleService integration", () => {
     expect(storedRun?.status).toBe("needs_human");
     expect(storedRun?.metrics.paper_quality?.confidence).toBeLessThan(0.75);
   });
+
+  it("graduates from approval_gate into epsilon_improve after consecutive accepts", async () => {
+    const repoRoot = await initFixtureRepo("graduation");
+    const frontierStore = new JsonFileFrontierStore(join(repoRoot, ".ralph", "frontier.json"));
+
+    await frontierStore.save([
+      {
+        frontierId: "frontier-existing",
+        runId: "run-existing",
+        candidateId: "candidate-existing",
+        acceptedAt: "2026-03-29T00:00:00.000Z",
+        metrics: {
+          feasibility: {
+            metricId: "feasibility",
+            value: 0.5,
+            direction: "maximize",
+            confidence: 0.95,
+            details: {},
+          },
+        },
+        artifacts: [
+          {
+            id: "draft",
+            path: join(repoRoot, "docs", "draft.md"),
+          },
+        ],
+      },
+    ]);
+
+    const service = new RunCycleService({
+      judgeProvider: createSequentialJudgeProvider([
+        ...Array.from({ length: 5 }, () => absolute(0.7, 0.9)),
+        ...Array.from({ length: 5 }, () => absolute(0.8, 0.9)),
+        ...Array.from({ length: 5 }, () => absolute(0.86, 0.4)),
+      ]),
+    });
+
+    const run1 = await service.run({ repoRoot });
+    const run2 = await service.run({ repoRoot });
+    const run3 = await service.run({ repoRoot });
+
+    expect(run1.status).toBe("accepted");
+    expect(run2.status).toBe("accepted");
+    expect(run3.status).toBe("accepted");
+
+    const decisionStore = new JsonFileDecisionStore(join(repoRoot, ".ralph", "decisions"));
+    const decision2 = await decisionStore.get("decision-run-0002");
+    const decision3 = await decisionStore.get("decision-run-0003");
+
+    expect(decision2?.graduation).toMatchObject({
+      activatedPolicy: "epsilon_improve",
+      consecutiveAccepts: 2,
+      epsilon: 0.05,
+    });
+    expect(decision3?.policyType).toBe("epsilon_improve");
+    expect(decision3?.reason).toContain("graduated autonomy active");
+  });
+
+  it("injects compacted history into the proposer when history mode is enabled", async () => {
+    const repoRoot = await initFixtureRepo("history");
+    const service = new RunCycleService();
+
+    const run1 = await service.run({ repoRoot });
+    const run2 = await service.run({ repoRoot });
+
+    expect(run1.status).toBe("accepted");
+    expect(run2.status).toBe("accepted");
+    expect(run2.runResult?.run.proposal.summary).toContain("history_context=enabled");
+
+    const draft = await readFile(join(repoRoot, "docs", "draft.md"), "utf8");
+    expect(draft).toContain("run-0001");
+    expect(draft).toContain("decision=accepted");
+  });
 });
 
-async function initFixtureRepo(mode: "numeric" | "judge"): Promise<string> {
+async function initFixtureRepo(mode: "numeric" | "judge" | "graduation" | "history"): Promise<string> {
   const repoRoot = join(tempRoot, `repo-${mode}`);
   await mkdir(join(repoRoot, "docs"), { recursive: true });
   await mkdir(join(repoRoot, "scripts"), { recursive: true });
@@ -162,16 +235,6 @@ async function initFixtureRepo(mode: "numeric" | "judge"): Promise<string> {
   await execa("git", ["config", "user.email", "tests@example.com"], { cwd: repoRoot });
 
   await writeFile(join(repoRoot, "docs", "draft.md"), "Baseline draft.\n", "utf8");
-  await writeFile(
-    join(repoRoot, "scripts", "propose.mjs"),
-    [
-      'import { writeFileSync } from "node:fs";',
-      'import { join } from "node:path";',
-      'writeFileSync(join(process.cwd(), "docs", "draft.md"), "Improved draft with stronger structure.\\n", "utf8");',
-      'console.log("proposal complete");',
-    ].join("\n"),
-    "utf8",
-  );
   await writeFile(
     join(repoRoot, "scripts", "experiment.mjs"),
     [
@@ -186,16 +249,34 @@ async function initFixtureRepo(mode: "numeric" | "judge"): Promise<string> {
   await writeFile(join(repoRoot, "prompts", "judge.md"), "Return JSON only.\n", "utf8");
 
   if (mode === "numeric") {
+    await writeFile(join(repoRoot, "scripts", "propose.mjs"), buildDefaultProposerScript(), "utf8");
     await writeFile(join(repoRoot, "scripts", "metric.mjs"), 'console.log("0.7");\n', "utf8");
     await writeFile(join(repoRoot, "ralph.yaml"), buildNumericManifest(), "utf8");
-  } else {
+  } else if (mode === "judge") {
+    await writeFile(join(repoRoot, "scripts", "propose.mjs"), buildDefaultProposerScript(), "utf8");
     await writeFile(join(repoRoot, "ralph.yaml"), buildJudgeManifest(), "utf8");
+  } else if (mode === "graduation") {
+    await writeFile(join(repoRoot, "scripts", "propose.mjs"), buildGraduationProposerScript(), "utf8");
+    await writeFile(join(repoRoot, "ralph.yaml"), buildGraduationManifest(), "utf8");
+  } else {
+    await writeFile(join(repoRoot, "scripts", "propose.mjs"), buildHistoryAwareProposerScript(), "utf8");
+    await writeFile(join(repoRoot, "scripts", "metric.mjs"), buildHistoryMetricScript(), "utf8");
+    await writeFile(join(repoRoot, "ralph.yaml"), buildHistoryManifest(), "utf8");
   }
 
   await execa("git", ["add", "."], { cwd: repoRoot });
   await execa("git", ["commit", "-m", "fixture"], { cwd: repoRoot });
 
   return repoRoot;
+}
+
+function buildDefaultProposerScript(): string {
+  return [
+    'import { writeFileSync } from "node:fs";',
+    'import { join } from "node:path";',
+    'writeFileSync(join(process.cwd(), "docs", "draft.md"), "Improved draft with stronger structure.\\n", "utf8");',
+    'console.log("proposal complete");',
+  ].join("\n");
 }
 
 function buildNumericManifest(): string {
@@ -306,6 +387,158 @@ function buildJudgeManifest(): string {
   ].join("\n");
 }
 
+function buildGraduationManifest(): string {
+  return [
+    'schemaVersion: "0.1"',
+    "project:",
+    "  name: service-graduation",
+    "  artifact: manuscript",
+    "  baselineRef: main",
+    "  workspace: git",
+    "scope:",
+    "  allowedGlobs:",
+    '    - "**/*.md"',
+    "  maxFilesChanged: 2",
+    "  maxLineDelta: 20",
+    "proposer:",
+    "  type: command",
+    '  command: "node scripts/propose.mjs"',
+    "experiment:",
+    "  run:",
+    '    command: "node scripts/experiment.mjs"',
+    "  outputs:",
+    "    - id: draft",
+    "      path: out/draft.md",
+    "judgePacks:",
+    "  - id: graduation-pack",
+    "    mode: absolute",
+    "    blindPairwise: true",
+    "    orderRandomized: true",
+    "    repeats: 5",
+    "    aggregation: mean",
+    "    judges:",
+    "      - model: fake-model",
+    "        weight: 1",
+    "    lowConfidenceThreshold: 0.75",
+    "    audit:",
+    "      sampleRate: 0",
+    "      freezeAutoAcceptIfAnchorFails: true",
+    "metrics:",
+    "  catalog:",
+    "    - id: feasibility",
+    "      kind: llm_score",
+    "      direction: maximize",
+    "      extractor:",
+    "        type: llm_judge",
+    "        judgePack: graduation-pack",
+    "        prompt: prompts/judge.md",
+    "        mode: absolute",
+    "        compareAgainst: none",
+    "        inputs:",
+    "          candidate: out/draft.md",
+    "        outputKey: score",
+    "constraints: []",
+    "frontier:",
+    "  strategy: single_best",
+    "  primaryMetric: feasibility",
+    "ratchet:",
+    "  type: approval_gate",
+    "  metric: feasibility",
+    "  minConfidence: 0.75",
+    "  graduation:",
+    "    consecutiveAccepts: 2",
+    "    epsilon: 0.05",
+    "storage:",
+    "  root: .ralph",
+    "",
+  ].join("\n");
+}
+
+function buildGraduationProposerScript(): string {
+  return [
+    'import { readFileSync, writeFileSync } from "node:fs";',
+    'import { join } from "node:path";',
+    'const draftPath = join(process.cwd(), "docs", "draft.md");',
+    'const current = readFileSync(draftPath, "utf8");',
+    'let next = "Draft v1.\\n";',
+    'if (current.includes("v1")) next = "Draft v2.\\n";',
+    'if (current.includes("v2")) next = "Draft v3.\\n";',
+    'writeFileSync(draftPath, next, "utf8");',
+    'console.log("proposal complete");',
+  ].join("\n");
+}
+
+function buildHistoryManifest(): string {
+  return [
+    'schemaVersion: "0.1"',
+    "project:",
+    "  name: service-history",
+    "  artifact: manuscript",
+    "  baselineRef: main",
+    "  workspace: git",
+    "scope:",
+    "  allowedGlobs:",
+    '    - "**/*.md"',
+    "  maxFilesChanged: 2",
+    "  maxLineDelta: 200",
+    "proposer:",
+    "  type: command",
+    '  command: "node scripts/propose.mjs"',
+    "  history:",
+    "    enabled: true",
+    "    maxRuns: 3",
+    "experiment:",
+    "  run:",
+    '    command: "node scripts/experiment.mjs"',
+    "  outputs:",
+    "    - id: draft",
+    "      path: out/draft.md",
+    "metrics:",
+    "  catalog:",
+    "    - id: quality",
+    "      kind: numeric",
+    "      direction: maximize",
+    "      extractor:",
+    "        type: command",
+    '        command: "node scripts/metric.mjs"',
+    "        parser: plain_number",
+    "constraints: []",
+    "frontier:",
+    "  strategy: single_best",
+    "  primaryMetric: quality",
+    "ratchet:",
+    "  type: epsilon_improve",
+    "  metric: quality",
+    "  epsilon: 0",
+    "storage:",
+    "  root: .ralph",
+    "",
+  ].join("\n");
+}
+
+function buildHistoryAwareProposerScript(): string {
+  return [
+    'import { writeFileSync } from "node:fs";',
+    'import { join } from "node:path";',
+    'const history = process.env.RRX_HISTORY_SUMMARY ?? "missing";',
+    'const hasPriorRun = history.includes("run-0001");',
+    'const body = hasPriorRun',
+    '  ? `Second improvement.\\n\\nHistory seen:\\n${history}`',
+    '  : `First improvement.\\n\\nHistory seen:\\n${history}`;',
+    'writeFileSync(join(process.cwd(), "docs", "draft.md"), body, "utf8");',
+    'console.log("proposal complete");',
+  ].join("\n");
+}
+
+function buildHistoryMetricScript(): string {
+  return [
+    'import { readFileSync } from "node:fs";',
+    'import { join } from "node:path";',
+    'const draft = readFileSync(join(process.cwd(), "out", "draft.md"), "utf8");',
+    'console.log(draft.includes("run-0001") ? "0.9" : "0.7");',
+  ].join("\n");
+}
+
 function createSequentialJudgeProvider(responses: JudgeResponse[]): JudgeProvider {
   let index = 0;
   return {
@@ -326,6 +559,16 @@ function pairwise(winner: "candidate" | "incumbent" | "tie", confidence?: number
     winner,
     rationale: `${winner} wins`,
     raw: JSON.stringify({ winner, confidence }),
+    ...(confidence === undefined ? {} : { confidence }),
+  };
+}
+
+function absolute(score: number, confidence?: number): JudgeResponse {
+  return {
+    mode: "absolute",
+    score,
+    rationale: `score ${score}`,
+    raw: JSON.stringify({ score, confidence }),
     ...(confidence === undefined ? {} : { confidence }),
   };
 }

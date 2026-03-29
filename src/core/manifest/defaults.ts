@@ -14,6 +14,7 @@ export const DEFAULT_AUDIT_SAMPLE_RATE = 0.1;
 export const DEFAULT_PROPOSER_EXPLORATION_RATIO = 0.3;
 export const DEFAULT_STAGNATION_AFTER_REJECTIONS = 3;
 export const DEFAULT_MAX_PATCH_COUNT = 1;
+export const DEFAULT_PROPOSER_HISTORY_MAX_RUNS = 5;
 
 export const manifestDefaults = {
   schemaVersion: DEFAULT_SCHEMA_VERSION,
@@ -44,6 +45,10 @@ export const manifestDefaults = {
     explorationRatio: DEFAULT_PROPOSER_EXPLORATION_RATIO,
     stagnationAfterRejections: DEFAULT_STAGNATION_AFTER_REJECTIONS,
     maxPatchCount: DEFAULT_MAX_PATCH_COUNT,
+    history: {
+      enabled: false,
+      maxRuns: DEFAULT_PROPOSER_HISTORY_MAX_RUNS,
+    },
   },
   storage: {
     root: DEFAULT_STORAGE_ROOT,

@@ -20,6 +20,7 @@ import type { RunRecord } from "../model/run-record.js";
 import { evaluateAnchorAgreement, applyAnchorAgreementGate, loadAnchorRecords, type AnchorCheckResult } from "./anchor-checker.js";
 import { sampleAuditQueue, type AuditQueueItem } from "./audit-sampler.js";
 import { evaluateChangeBudget, type ChangeBudgetDecision } from "./change-budget.js";
+import { compactRecentHistory, countConsecutiveAutoAccepts } from "./history-compactor.js";
 import { runExperiment } from "./experiment-runner.js";
 import { runLlmJudgeMetric } from "./judge-pack.js";
 import { GitWorktreeWorkspaceManager } from "./workspace-manager.js";
@@ -83,6 +84,11 @@ export async function runCycle(
   const manifestDir = dirname(input.manifestPath);
   const workspace = await dependencies.workspaceManager.createWorkspace(context.candidateId);
   const primaryMetric = getPrimaryMetric(input.manifest);
+  const priorRuns = await dependencies.runStore.list();
+  const priorDecisions = await dependencies.decisionStore.list();
+  const priorConsecutiveAccepts = countConsecutiveAutoAccepts(priorDecisions, {
+    metricId: input.manifest.ratchet.metric ?? primaryMetric,
+  });
 
   let runRecord = createInitialRunRecord(input.manifest, workspace.workspacePath, context);
   await dependencies.runStore.put(runRecord);
@@ -90,7 +96,14 @@ export async function runCycle(
   let frontier = input.currentFrontier;
 
   try {
-    const proposal = await executeProposal(input.manifest, workspace.workspacePath);
+    const proposerHistory = await buildProposerHistoryContext({
+      manifest: input.manifest,
+      runDir: context.runDir,
+      runs: priorRuns,
+      decisions: priorDecisions,
+      primaryMetric,
+    });
+    const proposal = await executeProposal(input.manifest, workspace.workspacePath, proposerHistory);
     const proposeStdoutPath = await persistText(join(context.runDir, "logs", "propose.stdout.log"), proposal.stdout);
 
     runRecord = {
@@ -98,7 +111,7 @@ export async function runCycle(
       proposal: {
         ...runRecord.proposal,
         proposerType: proposal.proposerType,
-        summary: proposal.summary,
+        summary: proposerHistory ? `${proposal.summary}; history_context=enabled` : proposal.summary,
       },
       logs: {
         ...runRecord.logs,
@@ -151,6 +164,7 @@ export async function runCycle(
       currentFrontier: frontier,
       constraints: constraintSummary,
       changeBudget,
+      priorConsecutiveAccepts,
     });
 
     let anchorCheck: AnchorCheckResult | undefined;
@@ -200,7 +214,7 @@ export async function runCycle(
       runId: context.runId,
       outcome: ratchetDecision.outcome,
       actorType: "system",
-      policyType: input.manifest.ratchet.type,
+      policyType: ratchetDecision.policyType,
       metricId: ratchetDecision.metricId,
       ...(ratchetDecision.delta === undefined ? {} : { delta: ratchetDecision.delta }),
       reason: ratchetDecision.reason,
@@ -209,6 +223,7 @@ export async function runCycle(
       beforeFrontierIds: frontier.map((entry) => entry.frontierId),
       afterFrontierIds: (frontierUpdate?.entries ?? frontier).map((entry) => entry.frontierId),
       auditRequired: false,
+      ...(ratchetDecision.graduation ? { graduation: ratchetDecision.graduation } : {}),
     };
     let auditQueue = buildAuditQueue(ratchetDecision.metricId, decisionRecord, input.manifest, metricEvaluation.packByMetricId);
     decisionRecord = {
@@ -334,12 +349,53 @@ function createInitialRunRecord(manifest: RalphManifest, workspacePath: string, 
   };
 }
 
-async function executeProposal(manifest: RalphManifest, workspacePath: string) {
+async function executeProposal(
+  manifest: RalphManifest,
+  workspacePath: string,
+  historyContext?: { summary: string; path: string },
+) {
   if (manifest.proposer.type !== "command") {
     throw new Error(`unsupported proposer type ${manifest.proposer.type} in v0.1 cycle runner`);
   }
 
-  return runCommandProposer(manifest.proposer as CommandProposerConfig, { workspacePath });
+  return runCommandProposer(manifest.proposer as CommandProposerConfig, {
+    workspacePath,
+    ...(historyContext
+      ? {
+          env: {
+            RRX_HISTORY_ENABLED: "1",
+            RRX_HISTORY_SUMMARY: historyContext.summary,
+            RRX_HISTORY_PATH: historyContext.path,
+          },
+        }
+      : {}),
+  });
+}
+
+async function buildProposerHistoryContext(input: {
+  manifest: RalphManifest;
+  runDir: string;
+  runs: RunRecord[];
+  decisions: DecisionRecord[];
+  primaryMetric: string;
+}): Promise<{ summary: string; path: string } | undefined> {
+  if (!input.manifest.proposer.history.enabled) {
+    return undefined;
+  }
+
+  const snapshot = compactRecentHistory({
+    runs: input.runs.filter((run) => run.phase === "completed"),
+    decisions: input.decisions,
+    maxRuns: input.manifest.proposer.history.maxRuns,
+    primaryMetric: input.primaryMetric,
+  });
+  const path = join(input.runDir, "history", "proposer-history.md");
+  await persistText(path, snapshot.summary);
+
+  return {
+    summary: snapshot.summary,
+    path,
+  };
 }
 
 interface EvaluateMetricsInput {
@@ -442,12 +498,14 @@ function resolveDecision(input: {
   currentFrontier: FrontierEntry[];
   constraints: { passed: boolean; reason: string };
   changeBudget: ChangeBudgetDecision;
+  priorConsecutiveAccepts: number;
 }): RatchetDecision {
   if (!input.changeBudget.withinBudget) {
     return {
       outcome: input.changeBudget.outcome === "needs_human" ? "needs_human" : "rejected",
       frontierChanged: false,
       metricId: getPrimaryMetric(input.manifest),
+      policyType: input.manifest.ratchet.type,
       reason: input.changeBudget.reason,
     };
   }
@@ -457,6 +515,7 @@ function resolveDecision(input: {
     primaryMetric: getPrimaryMetric(input.manifest),
     candidateMetrics: input.metrics,
     currentFrontier: input.currentFrontier,
+    priorConsecutiveAccepts: input.priorConsecutiveAccepts,
     ...(input.constraints.passed ? {} : { constraintFailureReason: input.constraints.reason }),
   });
 }

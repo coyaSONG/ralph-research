@@ -219,6 +219,54 @@ describe("ratchet-engine", () => {
     expect(decision.outcome).toBe("needs_human");
     expect(decision.reason).toContain("below threshold");
   });
+
+  it("records a graduation event when approval_gate reaches the consecutive accept threshold", () => {
+    const decision = evaluateRatchet({
+      ratchet: {
+        type: "approval_gate",
+        metric: "quality",
+        minConfidence: 0.8,
+        graduation: {
+          consecutiveAccepts: 2,
+          epsilon: 0.05,
+        },
+      },
+      primaryMetric: "quality",
+      candidateMetrics: { quality: makeMetric("quality", 0.9, "maximize", 0.95) },
+      currentFrontier: [makeFrontierEntry("frontier-000", makeMetric("quality", 0.8, "maximize", 0.9))],
+      priorConsecutiveAccepts: 1,
+    });
+
+    expect(decision.outcome).toBe("accepted");
+    expect(decision.policyType).toBe("approval_gate");
+    expect(decision.graduation).toMatchObject({
+      activatedPolicy: "epsilon_improve",
+      consecutiveAccepts: 2,
+      epsilon: 0.05,
+    });
+  });
+
+  it("switches approval_gate to epsilon_improve after graduation is unlocked", () => {
+    const decision = evaluateRatchet({
+      ratchet: {
+        type: "approval_gate",
+        metric: "quality",
+        minConfidence: 0.8,
+        graduation: {
+          consecutiveAccepts: 2,
+          epsilon: 0.05,
+        },
+      },
+      primaryMetric: "quality",
+      candidateMetrics: { quality: makeMetric("quality", 0.86, "maximize", 0.4) },
+      currentFrontier: [makeFrontierEntry("frontier-000", makeMetric("quality", 0.8, "maximize", 0.95))],
+      priorConsecutiveAccepts: 2,
+    });
+
+    expect(decision.outcome).toBe("accepted");
+    expect(decision.policyType).toBe("epsilon_improve");
+    expect(decision.reason).toContain("graduated autonomy active");
+  });
 });
 
 describe("run-state-machine", () => {
