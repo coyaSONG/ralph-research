@@ -222,9 +222,25 @@ describe("RunCycleService integration", () => {
     expect(draft).toContain("run-0001");
     expect(draft).toContain("decision=accepted");
   });
+
+  it("runs parallel proposers and selects the best candidate by metric", async () => {
+    const repoRoot = await initFixtureRepo("parallel");
+    const service = new RunCycleService();
+
+    const result = await service.run({ repoRoot });
+
+    expect(result.status).toBe("accepted");
+    expect(result.runResult?.run.proposal.proposerType).toBe("parallel");
+    expect(result.runResult?.run.proposal.summary).toContain("selected strategy 3");
+    expect(await readFile(join(repoRoot, "docs", "draft.md"), "utf8")).toContain("Candidate C");
+
+    const frontierStore = new JsonFileFrontierStore(join(repoRoot, ".ralph", "frontier.json"));
+    const frontier = await frontierStore.load();
+    expect(frontier[0]?.metrics.quality.value).toBeCloseTo(0.9);
+  });
 });
 
-async function initFixtureRepo(mode: "numeric" | "judge" | "graduation" | "history"): Promise<string> {
+async function initFixtureRepo(mode: "numeric" | "judge" | "graduation" | "history" | "parallel"): Promise<string> {
   const repoRoot = join(tempRoot, `repo-${mode}`);
   await mkdir(join(repoRoot, "docs"), { recursive: true });
   await mkdir(join(repoRoot, "scripts"), { recursive: true });
@@ -258,6 +274,12 @@ async function initFixtureRepo(mode: "numeric" | "judge" | "graduation" | "histo
   } else if (mode === "graduation") {
     await writeFile(join(repoRoot, "scripts", "propose.mjs"), buildGraduationProposerScript(), "utf8");
     await writeFile(join(repoRoot, "ralph.yaml"), buildGraduationManifest(), "utf8");
+  } else if (mode === "parallel") {
+    await writeFile(join(repoRoot, "scripts", "propose-a.mjs"), buildParallelProposerScript("Candidate A"), "utf8");
+    await writeFile(join(repoRoot, "scripts", "propose-b.mjs"), buildParallelProposerScript("Candidate B"), "utf8");
+    await writeFile(join(repoRoot, "scripts", "propose-c.mjs"), buildParallelProposerScript("Candidate C"), "utf8");
+    await writeFile(join(repoRoot, "scripts", "metric.mjs"), buildParallelMetricScript(), "utf8");
+    await writeFile(join(repoRoot, "ralph.yaml"), buildParallelManifest(), "utf8");
   } else {
     await writeFile(join(repoRoot, "scripts", "propose.mjs"), buildHistoryAwareProposerScript(), "utf8");
     await writeFile(join(repoRoot, "scripts", "metric.mjs"), buildHistoryMetricScript(), "utf8");
@@ -536,6 +558,78 @@ function buildHistoryMetricScript(): string {
     'import { join } from "node:path";',
     'const draft = readFileSync(join(process.cwd(), "out", "draft.md"), "utf8");',
     'console.log(draft.includes("run-0001") ? "0.9" : "0.7");',
+  ].join("\n");
+}
+
+function buildParallelProposerScript(label: string): string {
+  return [
+    'import { writeFileSync } from "node:fs";',
+    'import { join } from "node:path";',
+    `writeFileSync(join(process.cwd(), "docs", "draft.md"), "${label}\\n", "utf8");`,
+    'console.log("proposal complete");',
+  ].join("\n");
+}
+
+function buildParallelMetricScript(): string {
+  return [
+    'import { readFileSync } from "node:fs";',
+    'import { join } from "node:path";',
+    'const draft = readFileSync(join(process.cwd(), "out", "draft.md"), "utf8");',
+    'if (draft.includes("Candidate C")) console.log("0.9");',
+    'else if (draft.includes("Candidate B")) console.log("0.6");',
+    'else console.log("0.4");',
+  ].join("\n");
+}
+
+function buildParallelManifest(): string {
+  return [
+    'schemaVersion: "0.1"',
+    "project:",
+    "  name: service-parallel",
+    "  artifact: manuscript",
+    "  baselineRef: main",
+    "  workspace: git",
+    "scope:",
+    "  allowedGlobs:",
+    '    - "**/*.md"',
+    "  maxFilesChanged: 2",
+    "  maxLineDelta: 20",
+    "proposer:",
+    "  type: parallel",
+    "  pickBest: highest_metric",
+    "  strategies:",
+    "    - type: command",
+    '      command: "node scripts/propose-a.mjs"',
+    "    - type: command",
+    '      command: "node scripts/propose-b.mjs"',
+    "    - type: command",
+    '      command: "node scripts/propose-c.mjs"',
+    "experiment:",
+    "  run:",
+    '    command: "node scripts/experiment.mjs"',
+    "  outputs:",
+    "    - id: draft",
+    "      path: out/draft.md",
+    "metrics:",
+    "  catalog:",
+    "    - id: quality",
+    "      kind: numeric",
+    "      direction: maximize",
+    "      extractor:",
+    "        type: command",
+    '        command: "node scripts/metric.mjs"',
+    "        parser: plain_number",
+    "constraints: []",
+    "frontier:",
+    "  strategy: single_best",
+    "  primaryMetric: quality",
+    "ratchet:",
+    "  type: epsilon_improve",
+    "  metric: quality",
+    "  epsilon: 0",
+    "storage:",
+    "  root: .ralph",
+    "",
   ].join("\n");
 }
 

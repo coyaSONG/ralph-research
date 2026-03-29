@@ -6,7 +6,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { JsonFileRunStore } from "../src/adapters/fs/json-file-run-store.js";
 import { evaluateConstraints } from "../src/core/state/constraint-engine.js";
-import { compareSingleBestFrontier, updateSingleBestFrontier } from "../src/core/state/frontier-engine.js";
+import {
+  compareParetoFrontier,
+  compareSingleBestFrontier,
+  updateParetoFrontier,
+  updateSingleBestFrontier,
+} from "../src/core/state/frontier-engine.js";
 import { evaluateRatchet } from "../src/core/state/ratchet-engine.js";
 import { advanceRunPhase, canResume, recoverRun } from "../src/core/state/run-state-machine.js";
 import type { FrontierEntry } from "../src/core/model/frontier-entry.js";
@@ -170,6 +175,71 @@ describe("frontier-engine", () => {
       'missing primary metric "quality"',
     );
   });
+
+  it("accepts a non-dominated candidate into a pareto frontier", () => {
+    const incumbent = makeFrontierEntry("frontier-000", makeMetric("quality", 0.8, "maximize"));
+    incumbent.metrics.latency = makeMetric("latency", 150, "minimize");
+    const candidate = makeFrontierEntry("frontier-001", makeMetric("quality", 0.75, "maximize"));
+    candidate.metrics.latency = makeMetric("latency", 120, "minimize");
+
+    const result = updateParetoFrontier(
+      [incumbent],
+      candidate,
+      [
+        { metric: "quality", epsilon: 0 },
+        { metric: "latency", epsilon: 0 },
+      ],
+      "hypervolume",
+    );
+
+    expect(result.comparison.outcome).toBe("accepted");
+    expect(result.entries).toHaveLength(2);
+  });
+
+  it("rejects a pareto candidate when an incumbent dominates it", () => {
+    const incumbent = makeFrontierEntry("frontier-000", makeMetric("quality", 0.9, "maximize"));
+    incumbent.metrics.latency = makeMetric("latency", 100, "minimize");
+    const candidate = makeFrontierEntry("frontier-001", makeMetric("quality", 0.8, "maximize"));
+    candidate.metrics.latency = makeMetric("latency", 120, "minimize");
+
+    const comparison = compareParetoFrontier(
+      [incumbent],
+      candidate,
+      [
+        { metric: "quality", epsilon: 0 },
+        { metric: "latency", epsilon: 0 },
+      ],
+    );
+
+    expect(comparison.outcome).toBe("rejected");
+    expect(comparison.reason).toContain("pareto-dominated");
+  });
+
+  it("removes dominated incumbents when updating a pareto frontier", () => {
+    const incumbentA = makeFrontierEntry("frontier-000", makeMetric("quality", 0.7, "maximize"));
+    incumbentA.metrics.latency = makeMetric("latency", 130, "minimize");
+    const incumbentB = makeFrontierEntry("frontier-001", makeMetric("quality", 0.8, "maximize"));
+    incumbentB.metrics.latency = makeMetric("latency", 140, "minimize");
+    const candidate = makeFrontierEntry("frontier-002", makeMetric("quality", 0.82, "maximize"));
+    candidate.metrics.latency = makeMetric("latency", 120, "minimize");
+
+    const result = updateParetoFrontier(
+      [incumbentA, incumbentB],
+      candidate,
+      [
+        { metric: "quality", epsilon: 0 },
+        { metric: "latency", epsilon: 0 },
+      ],
+      "hypervolume",
+      {
+        quality: 0,
+        latency: 200,
+      },
+    );
+
+    expect(result.entries).toHaveLength(1);
+    expect(result.entries[0]?.frontierId).toBe("frontier-002");
+  });
 });
 
 describe("constraint-engine", () => {
@@ -266,6 +336,33 @@ describe("ratchet-engine", () => {
     expect(decision.outcome).toBe("accepted");
     expect(decision.policyType).toBe("epsilon_improve");
     expect(decision.reason).toContain("graduated autonomy active");
+  });
+
+  it("accepts a non-dominated candidate with pareto_dominance", () => {
+    const decision = evaluateRatchet({
+      ratchet: { type: "pareto_dominance" },
+      primaryMetric: "quality",
+      paretoObjectives: [
+        { metric: "quality", epsilon: 0 },
+        { metric: "latency", epsilon: 0 },
+      ],
+      candidateMetrics: {
+        quality: makeMetric("quality", 0.75, "maximize"),
+        latency: makeMetric("latency", 100, "minimize"),
+      },
+      currentFrontier: [
+        {
+          ...makeFrontierEntry("frontier-000", makeMetric("quality", 0.8, "maximize")),
+          metrics: {
+            quality: makeMetric("quality", 0.8, "maximize"),
+            latency: makeMetric("latency", 120, "minimize"),
+          },
+        },
+      ],
+    });
+
+    expect(decision.outcome).toBe("accepted");
+    expect(decision.policyType).toBe("pareto_dominance");
   });
 });
 

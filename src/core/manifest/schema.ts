@@ -62,9 +62,22 @@ export const operatorLlmProposerSchema = z.object({
   history: proposerHistorySchema.default(manifestDefaults.proposer.history),
 });
 
+const leafProposerSchema = z.discriminatedUnion("type", [
+  commandProposerSchema,
+  operatorLlmProposerSchema,
+]);
+
+export const parallelProposerSchema = z.object({
+  type: z.literal("parallel"),
+  strategies: z.array(leafProposerSchema).min(2),
+  pickBest: z.enum(["highest_metric", "judge_pairwise"]),
+  history: proposerHistorySchema.default(manifestDefaults.proposer.history),
+});
+
 export const proposerSchema = z.discriminatedUnion("type", [
   commandProposerSchema,
   operatorLlmProposerSchema,
+  parallelProposerSchema,
 ]);
 
 export const experimentSchema = z.object({
@@ -163,28 +176,21 @@ const singleBestFrontierSchema = z.object({
   primaryMetric: z.string().min(1),
 });
 
-const unsupportedParetoFrontierSchema = z
-  .object({
-    strategy: z.literal("pareto"),
-    objectives: z
-      .array(
-        z.object({
-          metric: z.string().min(1),
-          epsilon: z.number().nonnegative().default(0),
-        }),
-      )
-      .min(2),
-  })
-  .superRefine((_, ctx) => {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "frontier.strategy=pareto is not supported in v0.1",
-    });
-  });
+export const paretoObjectiveSchema = z.object({
+  metric: z.string().min(1),
+  epsilon: z.number().nonnegative().default(0),
+});
+
+const paretoFrontierSchema = z.object({
+  strategy: z.literal("pareto"),
+  objectives: z.array(paretoObjectiveSchema).min(2),
+  tieBreaker: z.enum(["hypervolume", "none"]).default("hypervolume"),
+  referencePoint: z.record(z.string(), z.number()).optional(),
+});
 
 export const frontierSchema = z.discriminatedUnion("strategy", [
   singleBestFrontierSchema,
-  unsupportedParetoFrontierSchema,
+  paretoFrontierSchema,
 ]);
 
 export const epsilonImproveRatchetSchema = z.object({
@@ -205,9 +211,14 @@ export const approvalGateRatchetSchema = z.object({
     .optional(),
 });
 
+export const paretoDominanceRatchetSchema = z.object({
+  type: z.literal("pareto_dominance"),
+});
+
 export const ratchetSchema = z.discriminatedUnion("type", [
   epsilonImproveRatchetSchema,
   approvalGateRatchetSchema,
+  paretoDominanceRatchetSchema,
 ]);
 
 export const storageSchema = z.object({
@@ -242,7 +253,35 @@ export const RalphManifestSchema = manifestShapeSchema.superRefine((manifest, ct
     });
   }
 
-  if (manifest.ratchet.metric && !metricIds.has(manifest.ratchet.metric)) {
+  if (manifest.frontier.strategy === "pareto") {
+    for (const [index, objective] of manifest.frontier.objectives.entries()) {
+      if (!metricIds.has(objective.metric)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `frontier objective references unknown metric "${objective.metric}"`,
+          path: ["frontier", "objectives", index, "metric"],
+        });
+      }
+    }
+
+    if (manifest.ratchet.type !== "pareto_dominance") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "frontier.strategy=pareto requires ratchet.type=pareto_dominance",
+        path: ["ratchet", "type"],
+      });
+    }
+  }
+
+  if (manifest.frontier.strategy === "single_best" && manifest.ratchet.type === "pareto_dominance") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "ratchet.type=pareto_dominance requires frontier.strategy=pareto",
+      path: ["frontier", "strategy"],
+    });
+  }
+
+  if ("metric" in manifest.ratchet && manifest.ratchet.metric && !metricIds.has(manifest.ratchet.metric)) {
     ctx.addIssue({
       code: z.ZodIssueCode.custom,
       message: `ratchet.metric references unknown metric "${manifest.ratchet.metric}"`,
@@ -278,10 +317,13 @@ export type JudgePack = z.infer<typeof judgePackSchema>;
 export type FrontierConfig = z.infer<typeof frontierSchema>;
 export type RatchetConfig = z.infer<typeof ratchetSchema>;
 export type CommandProposerConfig = z.infer<typeof commandProposerSchema>;
+export type ParallelProposerConfig = z.infer<typeof parallelProposerSchema>;
 export type CommandMetricExtractorConfig = z.infer<typeof commandMetricExtractorSchema>;
 export type CommandSpecConfig = z.infer<typeof commandSpecSchema>;
 export type ScopeConfig = z.infer<typeof scopeSchema>;
 export type LlmJudgeMetricExtractorConfig = z.infer<typeof llmJudgeMetricExtractorSchema>;
 export type ProposerHistoryConfig = z.infer<typeof proposerHistorySchema>;
+export type ParetoObjectiveConfig = z.infer<typeof paretoObjectiveSchema>;
+export type LeafProposerConfig = z.infer<typeof leafProposerSchema>;
 
 export { DEFAULT_MANIFEST_FILENAME };

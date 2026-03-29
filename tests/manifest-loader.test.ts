@@ -27,7 +27,15 @@ describe("loadManifestFromFile", () => {
     expect(loaded.manifest.storage.root).toBe(".rrx");
   });
 
-  it("rejects unsupported pareto frontier in v0.1", async () => {
+  it("loads a valid pareto manifest", async () => {
+    const loaded = await loadManifestFromFile(new URL("valid-pareto.ralph.yaml", fixturesDir).pathname);
+
+    expect(loaded.manifest.frontier.strategy).toBe("pareto");
+    expect(loaded.manifest.frontier.objectives).toHaveLength(2);
+    expect(loaded.manifest.ratchet.type).toBe("pareto_dominance");
+  });
+
+  it("rejects invalid pareto frontier combinations", async () => {
     await expect(loadManifestFromFile(new URL("invalid-pareto.ralph.yaml", fixturesDir).pathname)).rejects.toMatchObject({
       name: "ManifestLoadError",
     });

@@ -9,6 +9,7 @@ import type {
   CommandMetricExtractorConfig,
   CommandProposerConfig,
   JudgePack,
+  LeafProposerConfig,
   LlmJudgeMetricExtractorConfig,
   RalphManifest,
 } from "../manifest/schema.js";
@@ -23,13 +24,14 @@ import { evaluateChangeBudget, type ChangeBudgetDecision } from "./change-budget
 import { compactRecentHistory, countConsecutiveAutoAccepts } from "./history-compactor.js";
 import { runExperiment } from "./experiment-runner.js";
 import { runLlmJudgeMetric } from "./judge-pack.js";
+import { runParallelProposers } from "./parallel-proposer.js";
 import { GitWorktreeWorkspaceManager } from "./workspace-manager.js";
 import { extractCommandMetric } from "../../adapters/extractor/command-extractor.js";
 import { GitClient } from "../../adapters/git/git-client.js";
 import type { JudgeProvider } from "../../adapters/judge/llm-judge-provider.js";
 import { runCommandProposer } from "../../adapters/proposer/command-proposer.js";
 import { evaluateConstraints } from "../state/constraint-engine.js";
-import { updateSingleBestFrontier } from "../state/frontier-engine.js";
+import { updateParetoFrontier, updateSingleBestFrontier } from "../state/frontier-engine.js";
 import { evaluateRatchet, type RatchetDecision } from "../state/ratchet-engine.js";
 import { advanceRunPhase } from "../state/run-state-machine.js";
 
@@ -75,6 +77,22 @@ interface RunContext {
   manifestHash: string;
 }
 
+interface CandidateAttemptResult {
+  candidateId: string;
+  workspacePath: string;
+  proposerType: string;
+  operators: string[];
+  summary: string;
+  proposeStdoutPath: string;
+  runStdoutPath: string;
+  metrics: Record<string, MetricResult>;
+  artifacts: FrontierEntry["artifacts"];
+  constraints: ReturnType<typeof evaluateConstraints>;
+  changeBudget: ChangeBudgetDecision;
+  anchorChecks: Map<string, AnchorCheckResult>;
+  packByMetricId: Map<string, JudgePack>;
+}
+
 export async function runCycle(
   input: RunCycleInput,
   dependencies: CycleRunnerDependencies,
@@ -82,15 +100,14 @@ export async function runCycle(
   const now = dependencies.now ?? (() => new Date());
   const context = await createRunContext(input.repoRoot, input.manifest, dependencies.runStore, now);
   const manifestDir = dirname(input.manifestPath);
-  const workspace = await dependencies.workspaceManager.createWorkspace(context.candidateId);
-  const primaryMetric = getPrimaryMetric(input.manifest);
+  const referenceMetric = getReferenceMetric(input.manifest);
   const priorRuns = await dependencies.runStore.list();
   const priorDecisions = await dependencies.decisionStore.list();
   const priorConsecutiveAccepts = countConsecutiveAutoAccepts(priorDecisions, {
-    metricId: input.manifest.ratchet.metric ?? primaryMetric,
+    metricId: "metric" in input.manifest.ratchet ? input.manifest.ratchet.metric ?? referenceMetric : referenceMetric,
   });
 
-  let runRecord = createInitialRunRecord(input.manifest, workspace.workspacePath, context);
+  let runRecord = createInitialRunRecord(input.manifest, undefined, context);
   await dependencies.runStore.put(runRecord);
 
   let frontier = input.currentFrontier;
@@ -101,75 +118,55 @@ export async function runCycle(
       runDir: context.runDir,
       runs: priorRuns,
       decisions: priorDecisions,
-      primaryMetric,
+      primaryMetric: referenceMetric,
     });
-    const proposal = await executeProposal(input.manifest, workspace.workspacePath, proposerHistory);
-    const proposeStdoutPath = await persistText(join(context.runDir, "logs", "propose.stdout.log"), proposal.stdout);
+    const selectedCandidate = await prepareCandidateAttempt({
+      repoRoot: input.repoRoot,
+      manifestDir,
+      manifest: input.manifest,
+      runDir: context.runDir,
+      workspaceManager: dependencies.workspaceManager,
+      currentFrontier: frontier,
+      baseCandidateId: context.candidateId,
+      referenceMetric,
+      ...(proposerHistory ? { historyContext: proposerHistory } : {}),
+      ...(dependencies.judgeProvider ? { judgeProvider: dependencies.judgeProvider } : {}),
+    });
 
     runRecord = {
       ...runRecord,
+      candidateId: selectedCandidate.candidateId,
+      workspacePath: selectedCandidate.workspacePath,
       proposal: {
         ...runRecord.proposal,
-        proposerType: proposal.proposerType,
-        summary: proposerHistory ? `${proposal.summary}; history_context=enabled` : proposal.summary,
+        proposerType: input.manifest.proposer.type,
+        summary: selectedCandidate.summary,
+        operators: selectedCandidate.operators,
       },
       logs: {
         ...runRecord.logs,
-        proposeStdoutPath,
+        proposeStdoutPath: selectedCandidate.proposeStdoutPath,
+        runStdoutPath: selectedCandidate.runStdoutPath,
       },
     };
-    await dependencies.runStore.put(runRecord);
-
-    const experiment = await runExperiment(input.manifest.experiment.run, {
-      workspacePath: workspace.workspacePath,
-    });
-    const runStdoutPath = await persistText(join(context.runDir, "logs", "experiment.stdout.log"), experiment.stdout);
     runRecord = advanceRunPhase(
-      {
-        ...runRecord,
-        logs: {
-          ...runRecord.logs,
-          runStdoutPath,
-        },
-      },
+      runRecord,
       "executed",
     );
     await dependencies.runStore.put(runRecord);
 
-    const metricEvaluation = await evaluateMetrics({
-      repoRoot: input.repoRoot,
-      manifestDir,
-      manifest: input.manifest,
-      currentFrontier: frontier,
-      workspacePath: workspace.workspacePath,
-      runDir: context.runDir,
-      ...(dependencies.judgeProvider ? { judgeProvider: dependencies.judgeProvider } : {}),
-    });
-
-    const artifacts = await snapshotArtifacts(
-      input.manifest.experiment.outputs,
-      workspace.workspacePath,
-      join(context.runDir, "artifacts"),
-    );
-
-    const constraintSummary = evaluateConstraints(input.manifest.constraints, metricEvaluation.metrics);
-    const changeBudget = await evaluateChangeBudget({
-      workspacePath: workspace.workspacePath,
-      scope: input.manifest.scope,
-    });
-
     let ratchetDecision = resolveDecision({
       manifest: input.manifest,
-      metrics: metricEvaluation.metrics,
+      metrics: selectedCandidate.metrics,
       currentFrontier: frontier,
-      constraints: constraintSummary,
-      changeBudget,
+      constraints: selectedCandidate.constraints,
+      changeBudget: selectedCandidate.changeBudget,
       priorConsecutiveAccepts,
     });
 
     let anchorCheck: AnchorCheckResult | undefined;
     if (ratchetDecision.outcome === "accepted") {
-      anchorCheck = metricEvaluation.anchorChecks.get(ratchetDecision.metricId);
+      anchorCheck = selectedCandidate.anchorChecks.get(ratchetDecision.metricId);
       if (anchorCheck) {
         const gated = applyAnchorAgreementGate(ratchetDecision.outcome, anchorCheck);
         ratchetDecision = {
@@ -186,14 +183,14 @@ export async function runCycle(
         ...runRecord,
         proposal: {
           ...runRecord.proposal,
-          diffLines: changeBudget.summary.totalLineDelta,
-          filesChanged: changeBudget.summary.filesChanged,
-          changedPaths: changeBudget.summary.entries.map((entry) => entry.path),
-          withinBudget: changeBudget.withinBudget,
+          diffLines: selectedCandidate.changeBudget.summary.totalLineDelta,
+          filesChanged: selectedCandidate.changeBudget.summary.filesChanged,
+          changedPaths: selectedCandidate.changeBudget.summary.entries.map((entry) => entry.path),
+          withinBudget: selectedCandidate.changeBudget.withinBudget,
         },
-        metrics: metricEvaluation.metrics,
-        constraints: constraintSummary.results.map(stripConstraintReason),
-        artifacts,
+        metrics: selectedCandidate.metrics,
+        constraints: selectedCandidate.constraints.results.map(stripConstraintReason),
+        artifacts: selectedCandidate.artifacts,
       },
       "evaluated",
       {
@@ -203,10 +200,16 @@ export async function runCycle(
     await dependencies.runStore.put(runRecord);
 
     const decisionId = `decision-${context.runId}`;
-    const candidateFrontierEntry = buildFrontierEntry(context.runId, context.candidateId, now, metricEvaluation.metrics, artifacts);
+    const candidateFrontierEntry = buildFrontierEntry(
+      context.runId,
+      selectedCandidate.candidateId,
+      now,
+      selectedCandidate.metrics,
+      selectedCandidate.artifacts,
+    );
     const frontierUpdate =
       ratchetDecision.outcome === "accepted"
-        ? updateSingleBestFrontier(frontier, candidateFrontierEntry, primaryMetric)
+        ? updateFrontier(input.manifest, frontier, candidateFrontierEntry)
         : null;
 
     let decisionRecord: DecisionRecord = {
@@ -225,7 +228,7 @@ export async function runCycle(
       auditRequired: false,
       ...(ratchetDecision.graduation ? { graduation: ratchetDecision.graduation } : {}),
     };
-    let auditQueue = buildAuditQueue(ratchetDecision.metricId, decisionRecord, input.manifest, metricEvaluation.packByMetricId);
+    let auditQueue = buildAuditQueue(ratchetDecision.metricId, decisionRecord, input.manifest, selectedCandidate.packByMetricId);
     decisionRecord = {
       ...decisionRecord,
       auditRequired: auditQueue.length > 0,
@@ -239,7 +242,7 @@ export async function runCycle(
     await dependencies.runStore.put(runRecord);
 
     if (ratchetDecision.outcome === "accepted" && frontierUpdate) {
-      const promoted = await dependencies.workspaceManager.promoteWorkspace(context.candidateId, {
+      const promoted = await dependencies.workspaceManager.promoteWorkspace(selectedCandidate.candidateId, {
         excludePaths: input.manifest.experiment.outputs.map((output) => output.path),
       });
       const commitResult = await dependencies.gitClient.stageAndCommitPaths(
@@ -266,7 +269,7 @@ export async function runCycle(
     }
 
     if (ratchetDecision.outcome !== "needs_human") {
-      await dependencies.workspaceManager.cleanupWorkspace(context.candidateId);
+      await dependencies.workspaceManager.cleanupWorkspace(selectedCandidate.candidateId);
     }
     runRecord = advanceRunPhase(runRecord, "completed", {
       status: ratchetDecision.outcome,
@@ -279,7 +282,7 @@ export async function runCycle(
       decision: decisionRecord,
       frontier,
       auditQueue,
-      changeBudget,
+      changeBudget: selectedCandidate.changeBudget,
       ...(anchorCheck ? { anchorCheck } : {}),
     };
   } catch (error) {
@@ -325,7 +328,7 @@ async function createRunContext(
   };
 }
 
-function createInitialRunRecord(manifest: RalphManifest, workspacePath: string, context: RunContext): RunRecord {
+function createInitialRunRecord(manifest: RalphManifest, workspacePath: string | undefined, context: RunContext): RunRecord {
   return {
     runId: context.runId,
     cycle: context.cycle,
@@ -336,11 +339,16 @@ function createInitialRunRecord(manifest: RalphManifest, workspacePath: string, 
     startedAt: context.startedAt,
     manifestHash: context.manifestHash,
     workspaceRef: manifest.project.baselineRef,
-    workspacePath,
+    ...(workspacePath ? { workspacePath } : {}),
     proposal: {
       proposerType: manifest.proposer.type,
       summary: "proposal pending",
-      operators: manifest.proposer.type === "operator_llm" ? manifest.proposer.operators : [],
+      operators:
+        manifest.proposer.type === "operator_llm"
+          ? manifest.proposer.operators
+          : manifest.proposer.type === "parallel"
+            ? []
+            : [],
     },
     artifacts: [],
     metrics: {},
@@ -349,16 +357,174 @@ function createInitialRunRecord(manifest: RalphManifest, workspacePath: string, 
   };
 }
 
+async function prepareCandidateAttempt(input: {
+  repoRoot: string;
+  manifestDir: string;
+  manifest: RalphManifest;
+  runDir: string;
+  workspaceManager: GitWorktreeWorkspaceManager;
+  currentFrontier: FrontierEntry[];
+  judgeProvider?: JudgeProvider;
+  historyContext?: { summary: string; path: string };
+  baseCandidateId: string;
+  referenceMetric: string;
+}): Promise<CandidateAttemptResult> {
+  if (input.manifest.proposer.type === "parallel") {
+    const selection = await runParallelProposers<LeafProposerConfig, CandidateAttemptResult>({
+      strategies: input.manifest.proposer.strategies,
+      pickBest: input.manifest.proposer.pickBest,
+      referenceMetric: input.referenceMetric,
+      execute: async (strategy, index) => {
+        const candidateId = `${input.baseCandidateId}-p${String(index + 1).padStart(2, "0")}`;
+        const candidate = await executeCandidateStrategy({
+          repoRoot: input.repoRoot,
+          manifestDir: input.manifestDir,
+          manifest: input.manifest,
+          proposer: strategy,
+          candidateId,
+          runDir: input.runDir,
+          workspaceManager: input.workspaceManager,
+          currentFrontier: input.currentFrontier,
+          ...(input.judgeProvider ? { judgeProvider: input.judgeProvider } : {}),
+          ...(input.historyContext ? { historyContext: input.historyContext } : {}),
+        });
+        return {
+          strategyIndex: index,
+          strategyType: strategy.type,
+          candidate,
+          metrics: candidate.metrics,
+          summary: candidate.summary,
+        };
+      },
+      ...(input.manifest.proposer.pickBest === "judge_pairwise"
+        ? {
+            comparePairwise: async (left, right) =>
+              compareCandidateAttempts(
+                {
+                  manifest: input.manifest,
+                  manifestDir: input.manifestDir,
+                  referenceMetric: input.referenceMetric,
+                  ...(input.judgeProvider ? { judgeProvider: input.judgeProvider } : {}),
+                },
+                left.candidate,
+                right.candidate,
+              ),
+          }
+        : {}),
+    });
+
+    const hydratedCandidates = selection.candidates.map((candidate) => ({
+      ...candidate,
+      metrics: candidate.candidate.metrics,
+      summary: candidate.candidate.summary,
+    }));
+    const selected = hydratedCandidates.find((candidate) => candidate.strategyIndex === selection.selected.strategyIndex);
+    if (!selected) {
+      throw new Error("selected parallel candidate missing from candidate set");
+    }
+
+    await Promise.all(
+      hydratedCandidates
+        .filter((candidate) => candidate.strategyIndex !== selected.strategyIndex)
+        .map((candidate) => input.workspaceManager.cleanupWorkspace(candidate.candidate.candidateId)),
+    );
+
+    return {
+      ...selected.candidate,
+      proposerType: "parallel",
+      summary: `${selected.candidate.summary}; ${selection.selectionReason}`,
+    };
+  }
+
+  return executeCandidateStrategy({
+    repoRoot: input.repoRoot,
+    manifestDir: input.manifestDir,
+    manifest: input.manifest,
+    proposer: input.manifest.proposer,
+    candidateId: input.baseCandidateId,
+    runDir: input.runDir,
+    workspaceManager: input.workspaceManager,
+    currentFrontier: input.currentFrontier,
+    ...(input.historyContext ? { historyContext: input.historyContext } : {}),
+    ...(input.judgeProvider ? { judgeProvider: input.judgeProvider } : {}),
+  });
+}
+
+async function executeCandidateStrategy(input: {
+  repoRoot: string;
+  manifestDir: string;
+  manifest: RalphManifest;
+  proposer: LeafProposerConfig;
+  candidateId: string;
+  runDir: string;
+  workspaceManager: GitWorktreeWorkspaceManager;
+  currentFrontier: FrontierEntry[];
+  judgeProvider?: JudgeProvider;
+  historyContext?: { summary: string; path: string };
+}): Promise<CandidateAttemptResult> {
+  const workspace = await input.workspaceManager.createWorkspace(input.candidateId);
+  const proposal = await executeProposal(input.proposer, workspace.workspacePath, input.historyContext);
+  const proposeStdoutPath = await persistText(
+    join(input.runDir, "logs", `${input.candidateId}.propose.stdout.log`),
+    proposal.stdout,
+  );
+
+  const experiment = await runExperiment(input.manifest.experiment.run, {
+    workspacePath: workspace.workspacePath,
+  });
+  const runStdoutPath = await persistText(
+    join(input.runDir, "logs", `${input.candidateId}.experiment.stdout.log`),
+    experiment.stdout,
+  );
+
+  const metricEvaluation = await evaluateMetrics({
+    repoRoot: input.repoRoot,
+    manifestDir: input.manifestDir,
+    manifest: input.manifest,
+    currentFrontier: input.currentFrontier,
+    workspacePath: workspace.workspacePath,
+    runDir: join(input.runDir, "judge", input.candidateId),
+    ...(input.judgeProvider ? { judgeProvider: input.judgeProvider } : {}),
+  });
+
+  const artifacts = await snapshotArtifacts(
+    input.manifest.experiment.outputs,
+    workspace.workspacePath,
+    join(input.runDir, "artifacts", input.candidateId),
+  );
+  const constraints = evaluateConstraints(input.manifest.constraints, metricEvaluation.metrics);
+  const changeBudget = await evaluateChangeBudget({
+    workspacePath: workspace.workspacePath,
+    scope: input.manifest.scope,
+  });
+
+  return {
+    candidateId: input.candidateId,
+    workspacePath: workspace.workspacePath,
+    proposerType: input.proposer.type,
+    operators: input.proposer.type === "operator_llm" ? input.proposer.operators : [],
+    summary: input.historyContext ? `${proposal.summary}; history_context=enabled` : proposal.summary,
+    proposeStdoutPath,
+    runStdoutPath,
+    metrics: metricEvaluation.metrics,
+    artifacts,
+    constraints,
+    changeBudget,
+    anchorChecks: metricEvaluation.anchorChecks,
+    packByMetricId: metricEvaluation.packByMetricId,
+  };
+}
+
 async function executeProposal(
-  manifest: RalphManifest,
+  proposer: LeafProposerConfig,
   workspacePath: string,
   historyContext?: { summary: string; path: string },
 ) {
-  if (manifest.proposer.type !== "command") {
-    throw new Error(`unsupported proposer type ${manifest.proposer.type} in v0.1 cycle runner`);
+  if (proposer.type !== "command") {
+    throw new Error(`unsupported proposer type ${proposer.type} in cycle runner`);
   }
 
-  return runCommandProposer(manifest.proposer as CommandProposerConfig, {
+  return runCommandProposer(proposer as CommandProposerConfig, {
     workspacePath,
     ...(historyContext
       ? {
@@ -370,6 +536,103 @@ async function executeProposal(
         }
       : {}),
   });
+}
+
+async function compareCandidateAttempts(
+  input: {
+    manifest: RalphManifest;
+    manifestDir: string;
+    judgeProvider?: JudgeProvider;
+    referenceMetric: string;
+  },
+  left: CandidateAttemptResult,
+  right: CandidateAttemptResult,
+): Promise<"left" | "right" | "tie"> {
+  const metricDefinition = input.manifest.metrics.catalog.find((metric) => metric.id === input.referenceMetric);
+  if (!metricDefinition) {
+    throw new Error(`missing reference metric definition ${input.referenceMetric}`);
+  }
+
+  if (
+    metricDefinition.kind !== "llm_score" ||
+    metricDefinition.extractor.type !== "llm_judge" ||
+    metricDefinition.extractor.mode !== "pairwise"
+  ) {
+    return compareByMetric(left, right, input.referenceMetric);
+  }
+
+  if (!input.judgeProvider) {
+    throw new Error("parallel proposer pickBest=judge_pairwise requires a judge provider");
+  }
+
+  const extractor = metricDefinition.extractor as LlmJudgeMetricExtractorConfig;
+  const pack = getJudgePack(input.manifest, extractor.judgePack);
+  const prompt = await buildJudgePrompt({
+    repoRoot: process.cwd(),
+    manifestDir: input.manifestDir,
+    workspacePath: left.workspacePath,
+    extractor,
+    frontier: [
+      {
+        frontierId: `parallel-${right.candidateId}`,
+        runId: `parallel-${right.candidateId}`,
+        candidateId: right.candidateId,
+        acceptedAt: new Date(0).toISOString(),
+        metrics: right.metrics,
+        artifacts: right.artifacts,
+      },
+    ],
+  });
+
+  const result = await runLlmJudgeMetric({
+    metricId: metricDefinition.id,
+    direction: metricDefinition.direction,
+    extractor,
+    pack,
+    prompt,
+    provider: input.judgeProvider,
+  });
+
+  const winner = result.details.winner;
+  if (winner === "candidate") {
+    return "left";
+  }
+
+  if (winner === "incumbent") {
+    return "right";
+  }
+
+  return compareByMetric(left, right, input.referenceMetric);
+}
+
+function compareByMetric(
+  left: CandidateAttemptResult,
+  right: CandidateAttemptResult,
+  metricId: string,
+): "left" | "right" | "tie" {
+  const leftMetric = left.metrics[metricId];
+  const rightMetric = right.metrics[metricId];
+  if (!leftMetric || !rightMetric) {
+    throw new Error(`parallel proposer comparison requires metric "${metricId}" on both candidates`);
+  }
+
+  if (leftMetric.direction === "maximize") {
+    if (leftMetric.value > rightMetric.value) {
+      return "left";
+    }
+    if (leftMetric.value < rightMetric.value) {
+      return "right";
+    }
+    return "tie";
+  }
+
+  if (leftMetric.value < rightMetric.value) {
+    return "left";
+  }
+  if (leftMetric.value > rightMetric.value) {
+    return "right";
+  }
+  return "tie";
 }
 
 async function buildProposerHistoryContext(input: {
@@ -500,11 +763,12 @@ function resolveDecision(input: {
   changeBudget: ChangeBudgetDecision;
   priorConsecutiveAccepts: number;
 }): RatchetDecision {
+  const referenceMetric = getReferenceMetric(input.manifest);
   if (!input.changeBudget.withinBudget) {
     return {
       outcome: input.changeBudget.outcome === "needs_human" ? "needs_human" : "rejected",
       frontierChanged: false,
-      metricId: getPrimaryMetric(input.manifest),
+      metricId: referenceMetric,
       policyType: input.manifest.ratchet.type,
       reason: input.changeBudget.reason,
     };
@@ -512,10 +776,15 @@ function resolveDecision(input: {
 
   return evaluateRatchet({
     ratchet: input.manifest.ratchet,
-    primaryMetric: getPrimaryMetric(input.manifest),
+    primaryMetric: referenceMetric,
     candidateMetrics: input.metrics,
     currentFrontier: input.currentFrontier,
     priorConsecutiveAccepts: input.priorConsecutiveAccepts,
+    ...(input.manifest.frontier.strategy === "pareto"
+      ? {
+          paretoObjectives: input.manifest.frontier.objectives,
+        }
+      : {}),
     ...(input.constraints.passed ? {} : { constraintFailureReason: input.constraints.reason }),
   });
 }
@@ -664,10 +933,28 @@ function getJudgePack(manifest: RalphManifest, judgePackId: string): JudgePack {
   return pack;
 }
 
-function getPrimaryMetric(manifest: RalphManifest): string {
-  if (manifest.frontier.strategy !== "single_best") {
-    throw new Error(`frontier strategy ${manifest.frontier.strategy} is not supported in v0.1 cycle runner`);
+function getReferenceMetric(manifest: RalphManifest): string {
+  if (manifest.frontier.strategy === "single_best") {
+    return manifest.frontier.primaryMetric;
   }
 
-  return manifest.frontier.primaryMetric;
+  return manifest.frontier.objectives[0]!.metric;
+}
+
+function updateFrontier(
+  manifest: RalphManifest,
+  currentFrontier: FrontierEntry[],
+  candidateEntry: FrontierEntry,
+) {
+  if (manifest.frontier.strategy === "single_best") {
+    return updateSingleBestFrontier(currentFrontier, candidateEntry, manifest.frontier.primaryMetric);
+  }
+
+  return updateParetoFrontier(
+    currentFrontier,
+    candidateEntry,
+    manifest.frontier.objectives,
+    manifest.frontier.tieBreaker,
+    manifest.frontier.referencePoint,
+  );
 }

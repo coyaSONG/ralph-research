@@ -1,0 +1,37 @@
+schemaVersion: "0.1"
+project:
+  name: valid-pareto
+  artifact: code
+proposer:
+  type: command
+  command: ./scripts/propose.sh
+experiment:
+  run:
+    command: ./scripts/run.sh
+metrics:
+  catalog:
+    - id: quality
+      kind: numeric
+      direction: maximize
+      extractor:
+        type: command
+        command: ./scripts/metric-quality.sh
+        parser: plain_number
+    - id: latency
+      kind: numeric
+      direction: minimize
+      extractor:
+        type: command
+        command: ./scripts/metric-latency.sh
+        parser: plain_number
+constraints: []
+frontier:
+  strategy: pareto
+  objectives:
+    - metric: quality
+      epsilon: 0.01
+    - metric: latency
+      epsilon: 1
+  tieBreaker: hypervolume
+ratchet:
+  type: pareto_dominance

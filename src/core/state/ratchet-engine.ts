@@ -1,7 +1,7 @@
-import type { RatchetConfig } from "../manifest/schema.js";
+import type { ParetoObjectiveConfig, RatchetConfig } from "../manifest/schema.js";
 import type { FrontierEntry } from "../model/frontier-entry.js";
 import type { MetricResult } from "../model/metric.js";
-import { buildMetricComparisonReason, directionalDelta } from "./frontier-engine.js";
+import { buildMetricComparisonReason, compareParetoFrontier, directionalDelta } from "./frontier-engine.js";
 
 export interface RatchetDecision {
   outcome: "accepted" | "rejected" | "needs_human";
@@ -26,23 +26,33 @@ export interface RatchetInput {
   currentFrontier: FrontierEntry[];
   constraintFailureReason?: string;
   priorConsecutiveAccepts?: number;
+  paretoObjectives?: ParetoObjectiveConfig[];
 }
 
 export function evaluateRatchet(input: RatchetInput): RatchetDecision {
+  const metricId = "metric" in input.ratchet ? input.ratchet.metric ?? input.primaryMetric : input.primaryMetric;
+
   if (input.constraintFailureReason) {
     return {
       outcome: "rejected",
       frontierChanged: false,
-      metricId: input.ratchet.metric ?? input.primaryMetric,
+      metricId,
       policyType: input.ratchet.type,
       reason: input.constraintFailureReason,
     };
   }
 
-  const metricId = input.ratchet.metric ?? input.primaryMetric;
   const candidateMetric = getCandidateMetric(input.candidateMetrics, metricId);
   const incumbentMetric = input.currentFrontier[0]?.metrics[metricId];
   const priorConsecutiveAccepts = input.priorConsecutiveAccepts ?? 0;
+
+  if (input.ratchet.type === "pareto_dominance") {
+    if (!input.paretoObjectives) {
+      throw new Error("pareto_dominance ratchet requires paretoObjectives");
+    }
+
+    return evaluateParetoDominance(metricId, input.currentFrontier, input.candidateMetrics, input.paretoObjectives);
+  }
 
   if (input.ratchet.type === "epsilon_improve") {
     return evaluateEpsilonImprove(metricId, input.ratchet.epsilon, candidateMetric, incumbentMetric);
@@ -70,6 +80,31 @@ export function evaluateRatchet(input: RatchetInput): RatchetDecision {
     input.ratchet.graduation,
     priorConsecutiveAccepts,
   );
+}
+
+function evaluateParetoDominance(
+  metricId: string,
+  currentFrontier: FrontierEntry[],
+  candidateMetrics: Record<string, MetricResult>,
+  objectives: ParetoObjectiveConfig[],
+): RatchetDecision {
+  const candidateEntry: FrontierEntry = {
+    frontierId: "candidate-preview",
+    runId: "candidate-preview",
+    candidateId: "candidate-preview",
+    acceptedAt: new Date(0).toISOString(),
+    metrics: candidateMetrics,
+    artifacts: [],
+  };
+
+  const comparison = compareParetoFrontier(currentFrontier, candidateEntry, objectives);
+  return {
+    outcome: comparison.outcome,
+    frontierChanged: comparison.frontierChanged,
+    metricId,
+    policyType: "pareto_dominance",
+    reason: comparison.reason,
+  };
 }
 
 function evaluateEpsilonImprove(
