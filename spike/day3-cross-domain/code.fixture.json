@@ -1,0 +1,41 @@
+{
+  "fixture_id": "code",
+  "artifact_type": "code",
+  "baseline_path": "fixtures/code/calculator.py",
+  "proposal": {
+    "type": "llm_rewrite_file",
+    "model": "gpt-5.4-mini",
+    "operator": "fix_logic_bug",
+    "instruction": "Fix the bug so the tests pass. Preserve the function name and docstring. Keep the patch as small as possible.",
+    "line_budget": 10,
+    "max_output_lines": 20
+  },
+  "run": {
+    "type": "command",
+    "command": [
+      "uv",
+      "run",
+      "--with",
+      "pytest",
+      "pytest",
+      "-q"
+    ],
+    "cwd": "fixtures/code"
+  },
+  "evaluate": {
+    "type": "pytest_pass_count",
+    "command": [
+      "uv",
+      "run",
+      "--with",
+      "pytest",
+      "pytest",
+      "-q"
+    ],
+    "cwd": "fixtures/code"
+  },
+  "decide": {
+    "type": "numeric_improve",
+    "metric": "tests_passed"
+  }
+}

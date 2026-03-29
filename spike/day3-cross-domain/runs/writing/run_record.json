@@ -1,0 +1,28 @@
+{
+  "runId": "run-writing",
+  "fixtureId": "writing",
+  "status": "accepted",
+  "startedAt": "2026-03-28T16:50:47.650360+00:00",
+  "endedAt": "2026-03-28T16:51:28.192460+00:00",
+  "proposal": {
+    "proposerType": "llm_rewrite_file",
+    "operator": "strengthen_claim_evidence",
+    "summary": "Clarified that decision reasons are kept to support later review and explanation.",
+    "diffLines": 2,
+    "withinBudget": true
+  },
+  "run": {
+    "status": "completed",
+    "details": "no-op materialization"
+  },
+  "metrics": {
+    "primary": "pairwise_quality",
+    "baselineValue": 0,
+    "candidateValue": 3
+  },
+  "artifacts": {
+    "baselinePath": "/Users/chsong/Developer/Personal/ralph-research/spike/day3-cross-domain/fixtures/writing/baseline.md",
+    "candidatePath": "/Users/chsong/Developer/Personal/ralph-research/spike/day3-cross-domain/runs/writing/baseline.md"
+  },
+  "elapsedSec": 40.541748875
+}

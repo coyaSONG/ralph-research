@@ -1,0 +1,98 @@
+import { join, resolve } from "node:path";
+
+import { JsonFileDecisionStore } from "../../adapters/fs/json-file-decision-store.js";
+import { JsonFileFrontierStore } from "../../adapters/fs/json-file-frontier-store.js";
+import { JsonFileRunStore } from "../../adapters/fs/json-file-run-store.js";
+import { GitClient } from "../../adapters/git/git-client.js";
+import { acquireLock, releaseLock } from "../../adapters/fs/lockfile.js";
+import { loadManifestFromFile } from "../../adapters/fs/manifest-loader.js";
+import type { JudgeProvider } from "../../adapters/judge/llm-judge-provider.js";
+import { DEFAULT_MANIFEST_FILENAME } from "../../core/manifest/schema.js";
+import { DEFAULT_STORAGE_ROOT } from "../../core/manifest/defaults.js";
+import { type RecoveryPlan, canResume, recoverRun } from "../../core/state/run-state-machine.js";
+import { GitWorktreeWorkspaceManager } from "../../core/engine/workspace-manager.js";
+import { runCycle, type CycleRunResult } from "../../core/engine/cycle-runner.js";
+
+export interface RunCycleServiceInput {
+  repoRoot: string;
+  manifestPath?: string;
+  resume?: boolean;
+}
+
+export interface RunCycleServiceResult {
+  status: CycleRunResult["status"] | "resume_required";
+  manifestPath: string;
+  lockPath: string;
+  runResult?: CycleRunResult;
+  recoveryPlan?: RecoveryPlan;
+}
+
+export interface RunCycleServiceDependencies {
+  judgeProvider?: JudgeProvider;
+  now?: () => Date;
+}
+
+export class RunCycleService {
+  private readonly judgeProvider: JudgeProvider | undefined;
+  private readonly now: (() => Date) | undefined;
+
+  public constructor(dependencies: RunCycleServiceDependencies = {}) {
+    this.judgeProvider = dependencies.judgeProvider;
+    this.now = dependencies.now;
+  }
+
+  public async run(input: RunCycleServiceInput): Promise<RunCycleServiceResult> {
+    const repoRoot = resolve(input.repoRoot);
+    const manifestPath = resolve(repoRoot, input.manifestPath ?? DEFAULT_MANIFEST_FILENAME);
+    const lockPath = join(repoRoot, DEFAULT_STORAGE_ROOT, "lock");
+    const lock = await acquireLock(lockPath);
+
+    try {
+      const loadedManifest = await loadManifestFromFile(manifestPath);
+      const storageRoot = join(repoRoot, loadedManifest.manifest.storage.root);
+      const runStore = new JsonFileRunStore(join(storageRoot, "runs"));
+      const frontierStore = new JsonFileFrontierStore(join(storageRoot, "frontier.json"));
+      const decisionStore = new JsonFileDecisionStore(join(storageRoot, "decisions"));
+
+      const latestRun = (await runStore.list()).at(-1);
+      if (latestRun && canResume(latestRun) && !input.resume) {
+        return {
+          status: "resume_required",
+          manifestPath: loadedManifest.path,
+          lockPath,
+          recoveryPlan: recoverRun(latestRun),
+        };
+      }
+
+      const frontier = await frontierStore.load();
+      const workspaceManager = new GitWorktreeWorkspaceManager(repoRoot, storageRoot);
+      const gitClient = new GitClient(repoRoot);
+      const runResult = await runCycle(
+        {
+          repoRoot,
+          manifestPath: loadedManifest.path,
+          manifest: loadedManifest.manifest,
+          currentFrontier: frontier,
+        },
+        {
+          runStore,
+          frontierStore,
+          decisionStore,
+          workspaceManager,
+          gitClient,
+          ...(this.judgeProvider ? { judgeProvider: this.judgeProvider } : {}),
+          ...(this.now ? { now: this.now } : {}),
+        },
+      );
+
+      return {
+        status: runResult.status,
+        manifestPath: loadedManifest.path,
+        lockPath,
+        runResult,
+      };
+    } finally {
+      await releaseLock(lock.path, lock.metadata.token);
+    }
+  }
+}

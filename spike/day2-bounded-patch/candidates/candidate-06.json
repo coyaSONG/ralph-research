@@ -1,0 +1,1 @@
+{"candidate_text":"research-ratchet runs a local improvement loop for documents and code.\nIt compares candidates to the current best artifact, keeps accepted gains, and records decision reasons.","summary":"Compressed the prose while preserving the loop, acceptance filter, and decision logging."}

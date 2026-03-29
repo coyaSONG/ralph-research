@@ -1,0 +1,63 @@
+schemaVersion: "0.1"
+
+project:
+  name: writing-demo
+  artifact: manuscript
+  baselineRef: main
+  workspace: git
+
+scope:
+  allowedGlobs:
+    - "**/*.md"
+  maxFilesChanged: 2
+  maxLineDelta: 40
+
+proposer:
+  type: command
+  command: "node scripts/propose.mjs"
+
+experiment:
+  run:
+    command: "node scripts/experiment.mjs"
+  outputs:
+    - id: draft
+      path: out/draft.md
+
+judgePacks:
+  - id: writing-pack
+    mode: pairwise
+    blindPairwise: true
+    orderRandomized: true
+    repeats: 5
+    aggregation: majority_vote
+    judges:
+      - model: your-judge-model
+        weight: 1
+    lowConfidenceThreshold: 0.75
+    audit:
+      sampleRate: 0.1
+      freezeAutoAcceptIfAnchorFails: true
+
+metrics:
+  catalog:
+    - id: quality
+      kind: numeric
+      direction: maximize
+      extractor:
+        type: command
+        command: "node scripts/metric.mjs"
+        parser: plain_number
+
+constraints: []
+
+frontier:
+  strategy: single_best
+  primaryMetric: quality
+
+ratchet:
+  type: epsilon_improve
+  metric: quality
+  epsilon: 0
+
+storage:
+  root: .ralph

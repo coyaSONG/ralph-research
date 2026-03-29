@@ -1,0 +1,1 @@
+{"candidate_text":"research-ratchet runs a local improvement loop for documents and code. It compares each candidate with the current best artifact, accepts it only when the gain is clearly justified, and stores the reason for every decision.","summary":"Made the acceptance rule explicit by tying acceptance to a clearly justified gain and recorded rationale."}

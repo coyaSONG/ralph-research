@@ -1,0 +1,28 @@
+{
+  "runId": "run-code",
+  "fixtureId": "code",
+  "status": "accepted",
+  "startedAt": "2026-03-28T16:51:28.196329+00:00",
+  "endedAt": "2026-03-28T16:51:41.470151+00:00",
+  "proposal": {
+    "proposerType": "llm_rewrite_file",
+    "operator": "fix_logic_bug",
+    "summary": "Fixed the addition logic to return the sum of the two integers.",
+    "diffLines": 2,
+    "withinBudget": true
+  },
+  "run": {
+    "status": "completed",
+    "details": "pytest command executed during evaluation"
+  },
+  "metrics": {
+    "primary": "tests_passed",
+    "baselineValue": 0,
+    "candidateValue": 2
+  },
+  "artifacts": {
+    "baselinePath": "/Users/chsong/Developer/Personal/ralph-research/spike/day3-cross-domain/fixtures/code/calculator.py",
+    "candidatePath": "/Users/chsong/Developer/Personal/ralph-research/spike/day3-cross-domain/runs/code/calculator.py"
+  },
+  "elapsedSec": 13.273749500000001
+}

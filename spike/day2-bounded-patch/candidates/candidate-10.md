@@ -1,0 +1,1 @@
+research-ratchet runs a local improvement loop for documents and code. It compares each candidate directly against the current best artifact, keeps only accepted gains, and stores the reason for every decision.

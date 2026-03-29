@@ -1,0 +1,41 @@
+schemaVersion: "0.1"
+project:
+  name: writing-demo
+  artifact: literature_review
+scope:
+  allowedGlobs:
+    - docs/**/*.md
+    - prompts/**/*.md
+proposer:
+  type: operator_llm
+  model: openai:gpt-5.4-mini
+  prompt: prompts/proposer.md
+  operators:
+    - strengthen_claim_evidence
+experiment:
+  run:
+    command: ./scripts/build_review.sh
+judgePacks:
+  - id: writing-pairwise-v1
+    mode: pairwise
+    judges:
+      - model: openai:gpt-5.4-mini
+    anchors:
+      path: eval/anchors.jsonl
+metrics:
+  catalog:
+    - id: paper_quality
+      kind: llm_score
+      direction: maximize
+      extractor:
+        type: llm_judge
+        judgePack: writing-pairwise-v1
+        prompt: prompts/paper_quality_judge.md
+        inputs:
+          candidate: out/review.md
+frontier:
+  strategy: single_best
+  primaryMetric: paper_quality
+ratchet:
+  type: approval_gate
+  metric: paper_quality

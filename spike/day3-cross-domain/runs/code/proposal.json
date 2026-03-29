@@ -1,0 +1,1 @@
+{"candidate_text":"def add(a: int, b: int) -> int:\n    \"\"\"Return the sum of two integers.\"\"\"\n    return a + b\n","summary":"Fixed the addition logic to return the sum of the two integers."}

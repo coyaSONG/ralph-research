@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.ralph/
+.rrx-demo/
+.claude/
+__pycache__/
+*.pyc
+.judge-tmp/
+*.log

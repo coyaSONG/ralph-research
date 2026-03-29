@@ -1,0 +1,119 @@
+import { z } from "zod";
+
+import { metricResultSchema } from "./metric.js";
+
+export const runPhaseSchema = z.enum([
+  "proposed",
+  "executed",
+  "evaluated",
+  "decision_written",
+  "committed",
+  "frontier_updated",
+  "completed",
+  "failed",
+]);
+
+export const pendingActionSchema = z.enum([
+  "none",
+  "execute_experiment",
+  "evaluate_metrics",
+  "write_decision",
+  "commit_candidate",
+  "update_frontier",
+  "cleanup_workspace",
+]);
+
+export const runStatusSchema = z.enum([
+  "running",
+  "evaluated",
+  "accepted",
+  "rejected",
+  "needs_human",
+  "failed",
+]);
+
+export const runRecordSchema = z
+  .object({
+    runId: z.string().min(1),
+    cycle: z.number().int().nonnegative(),
+    candidateId: z.string().min(1),
+    status: runStatusSchema,
+    phase: runPhaseSchema,
+    pendingAction: pendingActionSchema.default("none"),
+    startedAt: z.string().datetime(),
+    endedAt: z.string().datetime().optional(),
+    manifestHash: z.string().min(1),
+    workspaceRef: z.string().min(1),
+    workspacePath: z.string().min(1).optional(),
+    proposal: z.object({
+      proposerType: z.string().min(1),
+      summary: z.string().min(1),
+      operators: z.array(z.string().min(1)).default([]),
+      patchPath: z.string().min(1).optional(),
+      diffLines: z.number().int().nonnegative().optional(),
+      filesChanged: z.number().int().nonnegative().optional(),
+      changedPaths: z.array(z.string().min(1)).optional(),
+      withinBudget: z.boolean().optional(),
+    }),
+    artifacts: z.array(
+      z.object({
+        id: z.string().min(1),
+        path: z.string().min(1),
+      }),
+    ),
+    metrics: z.record(z.string(), metricResultSchema).default({}),
+    constraints: z
+      .array(
+        z.object({
+          metric: z.string().min(1),
+          passed: z.boolean(),
+          actual: z.number(),
+          expected: z.number(),
+          op: z.string().min(1),
+        }),
+      )
+      .default([]),
+    decisionId: z.string().min(1).optional(),
+    logs: z
+      .object({
+        proposeStdoutPath: z.string().min(1).optional(),
+        runStdoutPath: z.string().min(1).optional(),
+      })
+      .default({}),
+    error: z
+      .object({
+        message: z.string().min(1),
+        stack: z.string().min(1).optional(),
+      })
+      .optional(),
+  })
+  .superRefine((record, ctx) => {
+    if (record.phase === "completed" && !record.endedAt) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "completed runs must include endedAt",
+        path: ["endedAt"],
+      });
+    }
+
+    if (record.phase === "failed" && !record.error) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "failed runs must include error information",
+        path: ["error"],
+      });
+    }
+
+    if (record.phase === "decision_written" && !record.decisionId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "decision_written runs must include a decisionId",
+        path: ["decisionId"],
+      });
+    }
+  });
+
+export type RunRecord = z.infer<typeof runRecordSchema>;
+export type RunPhase = z.infer<typeof runPhaseSchema>;
+export type RunStatus = z.infer<typeof runStatusSchema>;
+export type PendingAction = z.infer<typeof pendingActionSchema>;

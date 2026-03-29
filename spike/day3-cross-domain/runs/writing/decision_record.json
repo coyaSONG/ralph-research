@@ -1,0 +1,8 @@
+{
+  "decisionId": "decision-writing",
+  "runId": "run-writing",
+  "outcome": "accepted",
+  "reason": "candidate_wins=3, baseline_wins=0, stability=1.00, within_budget=True",
+  "frontierChanged": true,
+  "createdAt": "2026-03-28T16:51:28.192498+00:00"
+}

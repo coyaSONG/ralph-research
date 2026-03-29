@@ -1,0 +1,1 @@
+research-ratchet is important for research work. It is important because teams need a loop, and the loop should help improve drafts. The system should look at a draft, make a change, and then maybe keep it if it seems better. This is useful, but the idea is still repetitive and not very concrete.

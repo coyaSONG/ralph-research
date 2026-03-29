@@ -1,0 +1,10 @@
+{
+  "metric_id": "tests_passed",
+  "baseline_value": 0,
+  "candidate_value": 2,
+  "candidate_wins": true,
+  "baseline_stdout": "FF                                                                       [100%]\n=================================== FAILURES ===================================\n__________________________ test_add_positive_numbers ___________________________\n\n    def test_add_positive_numbers():\n>       assert add(2, 3) == 5\nE       assert -1 == 5\nE        +  where -1 = add(2, 3)\n\ntests/test_calculator.py:5: AssertionError\n_________________________ test_add_mixed_sign_numbers __________________________\n\n    def test_add_mixed_sign_numbers():\n>       assert add(-1, 1) == 0\nE       assert -2 == 0\nE        +  where -2 = add(-1, 1)\n\ntests/test_calculator.py:9: AssertionError\n=========================== short test summary info ============================\nFAILED tests/test_calculator.py::test_add_positive_numbers - assert -1 == 5\nFAILED tests/test_calculator.py::test_add_mixed_sign_numbers - assert -2 == 0\n2 failed in 0.01s\n",
+  "candidate_stdout": "..                                                                       [100%]\n2 passed in 0.00s\n",
+  "sample_reason": "Candidate passed 2 tests versus baseline 0.",
+  "workspace_path": "/Users/chsong/Developer/Personal/ralph-research/spike/day3-cross-domain/runs/code/workspace"
+}

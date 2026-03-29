@@ -1,0 +1,26 @@
+{
+  "fixture_id": "writing",
+  "artifact_type": "writing",
+  "baseline_path": "fixtures/writing/baseline.md",
+  "proposal": {
+    "type": "llm_rewrite_file",
+    "model": "gpt-5.4-mini",
+    "operator": "strengthen_claim_evidence",
+    "instruction": "Clarify why storing decision reasons matters for later review while preserving the original meaning.",
+    "line_budget": 10,
+    "max_output_lines": 4
+  },
+  "run": {
+    "type": "noop"
+  },
+  "evaluate": {
+    "type": "pairwise_judge",
+    "model": "gpt-5.4-mini",
+    "prompt_path": "../day1-judge-signal/judge_prompt.md",
+    "repeats": 3,
+    "stability_threshold": 0.67
+  },
+  "decide": {
+    "type": "pairwise_majority"
+  }
+}

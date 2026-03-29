@@ -1,0 +1,30 @@
+{
+  "metric_id": "pairwise_quality",
+  "baseline_value": 0,
+  "candidate_value": 3,
+  "candidate_wins": 3,
+  "baseline_wins": 0,
+  "stability": 1.0,
+  "avg_confidence": 0.9366666666666665,
+  "sample_reason": "Option 1 is clearer and more useful because it explains why the decision log is kept.",
+  "judgments": [
+    {
+      "repeat": 1,
+      "winner": "candidate",
+      "confidence": 0.94,
+      "reason": "Option 1 is clearer and more useful because it explains why the decision log is kept."
+    },
+    {
+      "repeat": 2,
+      "winner": "candidate",
+      "confidence": 0.92,
+      "reason": "Option 2 is slightly clearer and more useful because it explains why the decision log matters for later review."
+    },
+    {
+      "repeat": 3,
+      "winner": "candidate",
+      "confidence": 0.95,
+      "reason": "It is slightly more specific and useful by clarifying the purpose of storing decision reasons for later review."
+    }
+  ]
+}

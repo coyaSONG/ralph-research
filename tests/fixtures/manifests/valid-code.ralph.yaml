@@ -1,0 +1,39 @@
+schemaVersion: "0.1"
+project:
+  name: code-demo
+  artifact: code
+  baselineRef: main
+  workspace: git
+scope:
+  allowedGlobs:
+    - src/**/*.py
+    - tests/**/*.py
+  maxFilesChanged: 2
+  maxLineDelta: 20
+proposer:
+  type: command
+  command: ./scripts/propose_fix.sh
+experiment:
+  run:
+    command: uv run pytest -q
+    cwd: .
+    timeoutSec: 300
+metrics:
+  catalog:
+    - id: tests_passed
+      kind: numeric
+      direction: maximize
+      extractor:
+        type: command
+        command: ./scripts/metric_tests.sh
+        parser: json_path
+        valuePath: $.passed
+frontier:
+  strategy: single_best
+  primaryMetric: tests_passed
+ratchet:
+  type: epsilon_improve
+  metric: tests_passed
+  epsilon: 1
+storage:
+  root: .rrx

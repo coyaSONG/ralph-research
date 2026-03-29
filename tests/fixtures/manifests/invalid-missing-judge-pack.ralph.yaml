@@ -1,0 +1,27 @@
+schemaVersion: "0.1"
+project:
+  name: missing-judge-pack
+  artifact: manuscript
+proposer:
+  type: operator_llm
+  model: openai:gpt-5.4-mini
+  prompt: prompts/proposer.md
+  operators:
+    - restructure_outline
+experiment:
+  run:
+    command: ./scripts/build.sh
+metrics:
+  catalog:
+    - id: quality
+      kind: llm_score
+      direction: maximize
+      extractor:
+        type: llm_judge
+        judgePack: does-not-exist
+        prompt: prompts/judge.md
+frontier:
+  strategy: single_best
+  primaryMetric: quality
+ratchet:
+  type: approval_gate

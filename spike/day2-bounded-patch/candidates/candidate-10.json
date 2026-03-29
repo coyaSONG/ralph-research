@@ -1,0 +1,1 @@
+{"candidate_text":"research-ratchet runs a local improvement loop for documents and code. It compares each candidate directly against the current best artifact, keeps only accepted gains, and stores the reason for every decision.","summary":"Strengthened the comparison claim by making the current best artifact the explicit baseline."}

@@ -1,0 +1,27 @@
+schemaVersion: "0.1"
+project:
+  name: invalid-pareto
+  artifact: generic
+proposer:
+  type: command
+  command: ./scripts/propose.sh
+experiment:
+  run:
+    command: ./scripts/run.sh
+metrics:
+  catalog:
+    - id: quality
+      kind: numeric
+      direction: maximize
+      extractor:
+        type: command
+        command: ./scripts/metric.sh
+frontier:
+  strategy: pareto
+  objectives:
+    - metric: quality
+      epsilon: 0.01
+    - metric: cost
+      epsilon: 0.01
+ratchet:
+  type: epsilon_improve
