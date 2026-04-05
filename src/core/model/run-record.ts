@@ -3,6 +3,7 @@ import { z } from "zod";
 import { metricResultSchema } from "./metric.js";
 
 export const runPhaseSchema = z.enum([
+  "started",
   "proposed",
   "executed",
   "evaluated",
@@ -15,6 +16,7 @@ export const runPhaseSchema = z.enum([
 
 export const pendingActionSchema = z.enum([
   "none",
+  "prepare_proposal",
   "execute_experiment",
   "evaluate_metrics",
   "write_decision",

@@ -28,4 +28,26 @@ export class GitClient {
     const { stdout } = await execa("git", ["-C", this.repoRoot, "rev-parse", "HEAD"]);
     return stdout.trim();
   }
+
+  public async applyPatchIfNeeded(patchPath: string): Promise<"applied" | "already_applied"> {
+    if (await this.canApplyPatch(["apply", "--check", "--3way", "--index", "-p2", patchPath])) {
+      await execa("git", ["-C", this.repoRoot, "apply", "--3way", "--index", "-p2", patchPath]);
+      return "applied";
+    }
+
+    if (await this.canApplyPatch(["apply", "--check", "--reverse", "--index", "-p2", patchPath])) {
+      return "already_applied";
+    }
+
+    throw new Error(`repository state diverged from durable promotion patch ${patchPath}`);
+  }
+
+  private async canApplyPatch(args: string[]): Promise<boolean> {
+    try {
+      await execa("git", ["-C", this.repoRoot, ...args]);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 }

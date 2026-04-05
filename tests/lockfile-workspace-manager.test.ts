@@ -1,11 +1,12 @@
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 
 import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { acquireLock, isStaleLock, readLockMetadata, releaseLock } from "../src/adapters/fs/lockfile.js";
+import { acquireLock, isStaleLock, readLockMetadata, releaseLock, renewLock } from "../src/adapters/fs/lockfile.js";
 import { GitWorktreeWorkspaceManager } from "../src/core/engine/workspace-manager.js";
 
 let tempRoot = "";
@@ -62,6 +63,53 @@ describe("lockfile", () => {
     expect(metadata).not.toBeNull();
     expect(metadata?.token).toBe(handle.metadata.token);
     expect(metadata?.token).not.toBe("stale-token");
+  });
+
+  it("renews a lease heartbeat before ttl expiry and keeps the lock non-stale", async () => {
+    const lockPath = join(tempRoot, ".ralph", "lock");
+    const handle = await acquireLock(lockPath, { ttlMs: 50, graceMs: 25 });
+    const initialMetadata = await readLockMetadata(lockPath);
+
+    await delay(20);
+    const renewed = await renewLock(lockPath, handle.metadata.token);
+
+    expect(Date.parse(renewed.updatedAt)).toBeGreaterThan(Date.parse(initialMetadata!.updatedAt));
+    expect(await isStaleLock(lockPath)).toBe(false);
+
+    await releaseLock(lockPath, handle.metadata.token);
+  });
+
+  it("does not allow takeover until ttl plus grace has elapsed for a live owner", async () => {
+    const lockPath = join(tempRoot, ".ralph", "lock");
+    await mkdir(dirname(lockPath), { recursive: true });
+
+    await writeFile(
+      lockPath,
+      `${JSON.stringify(
+        {
+          pid: process.pid,
+          token: "active-token",
+          createdAt: "2026-03-29T00:00:00.000Z",
+          updatedAt: new Date(Date.now() - 60).toISOString(),
+          ttlMs: 50,
+          graceMs: 50,
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    expect(await isStaleLock(lockPath)).toBe(false);
+    await expect(acquireLock(lockPath, { ttlMs: 50, graceMs: 50 })).rejects.toThrow("Active lock already exists");
+  });
+
+  it("rejects renewal when the token does not match the lock owner", async () => {
+    const lockPath = join(tempRoot, ".ralph", "lock");
+    const handle = await acquireLock(lockPath);
+
+    await expect(renewLock(lockPath, "wrong-token")).rejects.toThrow("token mismatch");
+    await releaseLock(lockPath, handle.metadata.token);
   });
 });
 

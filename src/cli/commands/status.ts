@@ -34,6 +34,7 @@ export async function runStatusCommand(
         [
           `manifest: ${status.manifestPath}`,
           `latest run: ${status.latestRun?.runId ?? "none"} (${status.latestRun?.status ?? "n/a"})`,
+          `recovery: ${status.recovery.classification} (${status.recovery.nextAction})`,
           `frontier entries: ${status.frontier.length}`,
           `pending human: ${status.pendingHumanRuns.length}`,
         ].join("\n"),

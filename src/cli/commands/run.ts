@@ -6,7 +6,7 @@ export interface RunCommandOptions {
   path?: string;
   cycles?: number;
   json?: boolean;
-  resume?: boolean;
+  fresh?: boolean;
 }
 
 export interface CommandIO {
@@ -36,11 +36,15 @@ export async function runRunCommand(
       const result = await service.run({
         repoRoot: process.cwd(),
         ...(options.path ? { manifestPath: options.path } : {}),
-        ...(options.resume ? { resume: options.resume } : {}),
+        ...(options.fresh ? { fresh: options.fresh } : {}),
       });
       results.push(result);
 
-      if (result.status === "failed" || result.status === "resume_required") {
+      if (result.warning && !options.json) {
+        io.stderr(result.warning);
+      }
+
+      if (result.status === "failed") {
         if (options.json) {
           io.stdout(JSON.stringify({ ok: false, results }, null, 2));
         } else {
@@ -85,7 +89,7 @@ export function registerRunCommand(program: Command): void {
     .description("Run one or more research cycles.")
     .option("-p, --path <path>", "Path to the manifest file")
     .option("-c, --cycles <count>", "Number of cycles to run", (value) => Number.parseInt(value, 10), 1)
-    .option("--resume", "Resume if the latest run is recoverable", false)
+    .option("--fresh", "Start a fresh run instead of auto-resuming the latest recoverable run", false)
     .option("--json", "Emit machine-readable output", false)
     .action(async (options: RunCommandOptions) => {
       const exitCode = await runRunCommand(options);

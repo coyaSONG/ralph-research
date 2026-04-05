@@ -86,6 +86,24 @@ describe("CLI commands", () => {
     expect(payload.frontier[0]?.metrics.quality.value).toBeCloseTo(0.7);
   });
 
+  it("rebuilds frontier output when the snapshot is missing", async () => {
+    const repoRoot = await initFixtureRepo("numeric");
+    process.chdir(repoRoot);
+
+    const runStore = new JsonFileRunStore(join(repoRoot, ".ralph", "runs"));
+    const decisionStore = new JsonFileDecisionStore(join(repoRoot, ".ralph", "decisions"));
+    await runStore.put(makeAcceptedFrontierRunRecord());
+    await decisionStore.put(makeAcceptedFrontierDecisionRecord());
+
+    const io = createCapturingIo();
+    const exitCode = await runFrontierCommand({ json: true }, io);
+
+    expect(exitCode).toBe(0);
+    const payload = JSON.parse(io.stdoutText());
+    expect(payload.frontier).toHaveLength(1);
+    expect(payload.frontier[0]?.runId).toBe("run-0001");
+  });
+
   it("shows decision reason, metric delta, and judge rationale in inspect output", async () => {
     const repoRoot = await initFixtureRepo("judge");
     process.chdir(repoRoot);
@@ -490,6 +508,61 @@ function buildJudgeManifest(options: { baselineRef?: string; workspace?: "git" |
     "  root: .ralph",
     "",
   ].join("\n");
+}
+
+function makeAcceptedFrontierRunRecord() {
+  return {
+    runId: "run-0001",
+    cycle: 1,
+    candidateId: "candidate-0001",
+    status: "accepted" as const,
+    phase: "completed" as const,
+    pendingAction: "none" as const,
+    startedAt: "2026-03-29T00:00:00.000Z",
+    endedAt: "2026-03-29T00:10:00.000Z",
+    manifestHash: "manifest-hash",
+    workspaceRef: "main",
+    proposal: {
+      proposerType: "command",
+      summary: "accepted frontier seed",
+      operators: [],
+    },
+    artifacts: [
+      {
+        id: "draft",
+        path: "out/draft.md",
+      },
+    ],
+    metrics: {
+      quality: {
+        metricId: "quality",
+        value: 0.9,
+        direction: "maximize" as const,
+        details: {},
+      },
+    },
+    constraints: [],
+    decisionId: "decision-run-0001",
+    logs: {},
+  };
+}
+
+function makeAcceptedFrontierDecisionRecord() {
+  return {
+    decisionId: "decision-run-0001",
+    runId: "run-0001",
+    outcome: "accepted" as const,
+    actorType: "system" as const,
+    policyType: "epsilon_improve",
+    metricId: "quality",
+    reason: "accepted by seed",
+    createdAt: "2026-03-29T00:10:00.000Z",
+    frontierChanged: true,
+    beforeFrontierIds: [],
+    afterFrontierIds: ["frontier-run-0001"],
+    commitSha: "abc123",
+    auditRequired: false,
+  };
 }
 
 function createSequentialJudgeProvider(responses: JudgeResponse[]): JudgeProvider {

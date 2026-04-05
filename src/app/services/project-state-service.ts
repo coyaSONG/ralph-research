@@ -8,6 +8,8 @@ import { DEFAULT_MANIFEST_FILENAME } from "../../core/manifest/schema.js";
 import type { DecisionRecord } from "../../core/model/decision-record.js";
 import type { FrontierEntry } from "../../core/model/frontier-entry.js";
 import type { RunRecord } from "../../core/model/run-record.js";
+import { materializeFrontier } from "../../core/state/frontier-materializer.js";
+import { classifyRecovery, type RecoveryStatus } from "../../core/state/recovery-classifier.js";
 
 export interface ProjectStateInput {
   repoRoot: string;
@@ -17,6 +19,7 @@ export interface ProjectStateInput {
 export interface ProjectStatus {
   manifestPath: string;
   latestRun: RunRecord | null;
+  recovery: RecoveryStatus;
   frontier: FrontierEntry[];
   pendingHumanRuns: RunRecord[];
   decisions: DecisionRecord[];
@@ -26,6 +29,7 @@ export interface InspectRunResult {
   manifestPath: string;
   run: RunRecord;
   decision: DecisionRecord | null;
+  recovery: RecoveryStatus;
   frontier: FrontierEntry[];
   explainability: {
     decisionReason: string | null;
@@ -58,14 +62,28 @@ export class RunNotFoundError extends Error {
 }
 
 export async function getProjectStatus(input: ProjectStateInput): Promise<ProjectStatus> {
-  const { manifestPath, runStore, decisionStore, frontierStore } = await loadProjectStores(input);
+  const { manifestPath, manifest, runStore, decisionStore, frontierStore } = await loadProjectStores(input);
   const runs = await runStore.list();
   const decisions = await decisionStore.list();
-  const frontier = await frontierStore.load();
+  const frontier = await materializeFrontier({
+    manifest,
+    frontierStore,
+    runs,
+    decisions,
+  });
+  const latestRun = runs.at(-1) ?? null;
+  const latestDecision = latestRun?.decisionId
+    ? decisions.find((decision) => decision.decisionId === latestRun.decisionId) ?? await decisionStore.get(latestRun.decisionId)
+    : null;
 
   return {
     manifestPath,
-    latestRun: runs.at(-1) ?? null,
+    latestRun,
+    recovery: classifyRecovery({
+      latestRun,
+      decision: latestDecision,
+      frontier,
+    }),
     frontier,
     pendingHumanRuns: runs.filter((run) => run.status === "needs_human"),
     decisions,
@@ -76,22 +94,36 @@ export async function getProjectFrontier(input: ProjectStateInput): Promise<{
   manifestPath: string;
   frontier: FrontierEntry[];
 }> {
-  const { manifestPath, frontierStore } = await loadProjectStores(input);
+  const { manifestPath, manifest, runStore, decisionStore, frontierStore } = await loadProjectStores(input);
+  const runs = await runStore.list();
+  const decisions = await decisionStore.list();
   return {
     manifestPath,
-    frontier: await frontierStore.load(),
+    frontier: await materializeFrontier({
+      manifest,
+      frontierStore,
+      runs,
+      decisions,
+    }),
   };
 }
 
 export async function inspectRun(input: ProjectStateInput & { runId: string }): Promise<InspectRunResult> {
-  const { manifestPath, runStore, decisionStore, frontierStore } = await loadProjectStores(input);
+  const { manifestPath, manifest, runStore, decisionStore, frontierStore } = await loadProjectStores(input);
+  const runs = await runStore.list();
+  const decisions = await decisionStore.list();
   const run = await runStore.get(input.runId);
   if (!run) {
     throw new RunNotFoundError(input.runId);
   }
 
   const decision = run.decisionId ? await decisionStore.get(run.decisionId) : null;
-  const frontier = await frontierStore.load();
+  const frontier = await materializeFrontier({
+    manifest,
+    frontierStore,
+    runs,
+    decisions,
+  });
 
   const judgeRationales = Object.values(run.metrics)
     .flatMap((metric) => {
@@ -121,6 +153,11 @@ export async function inspectRun(input: ProjectStateInput & { runId: string }): 
     manifestPath,
     run,
     decision,
+    recovery: classifyRecovery({
+      latestRun: run,
+      decision,
+      frontier,
+    }),
     frontier,
     explainability: {
       decisionReason: decision?.reason ?? null,
@@ -144,6 +181,7 @@ async function loadProjectStores(input: ProjectStateInput) {
 
   return {
     manifestPath: loadedManifest.path,
+    manifest: loadedManifest.manifest,
     runStore: new JsonFileRunStore(join(storageRoot, "runs")),
     decisionStore: new JsonFileDecisionStore(join(storageRoot, "decisions")),
     frontierStore: new JsonFileFrontierStore(join(storageRoot, "frontier.json")),

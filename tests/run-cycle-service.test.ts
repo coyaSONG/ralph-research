@@ -11,6 +11,7 @@ import { JsonFileRunStore } from "../src/adapters/fs/json-file-run-store.js";
 import type { JudgeProvider, JudgeRequest, JudgeResponse } from "../src/adapters/judge/llm-judge-provider.js";
 import { RunCycleService } from "../src/app/services/run-cycle-service.js";
 import { ManifestLoadError } from "../src/adapters/fs/manifest-loader.js";
+import { GitWorktreeWorkspaceManager } from "../src/core/engine/workspace-manager.js";
 
 let tempRoot = "";
 
@@ -49,6 +50,8 @@ describe("RunCycleService integration", () => {
 
     expect(run?.status).toBe("accepted");
     expect(run?.phase).toBe("completed");
+    expect(run?.proposal.patchPath).toBeTruthy();
+    await expect(pathExists(run?.proposal.patchPath ?? "")).resolves.toBe(true);
     expect(decision?.outcome).toBe("accepted");
     expect(decision?.commitSha).toBeTruthy();
     expect(frontier).toHaveLength(1);
@@ -314,6 +317,102 @@ describe("RunCycleService integration", () => {
     expect(await readFile(join(repoRoot, "docs", "draft.md"), "utf8")).toContain("baseline version");
     expect(await readFile(join(repoRoot, "docs", "draft.md"), "utf8")).not.toContain("head version");
   });
+
+  it("fails fast with owner details when another healthy process already owns the lease", async () => {
+    const repoRoot = await initFixtureRepo("numeric");
+    await mkdir(join(repoRoot, ".ralph"), { recursive: true });
+    await writeFile(
+      join(repoRoot, ".ralph", "lock"),
+      `${JSON.stringify(
+        {
+          pid: process.pid,
+          token: "active-token",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          ttlMs: 10_000,
+          graceMs: 5_000,
+          owner: {
+            runId: "run-0099",
+            operation: "run-cycle",
+          },
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const service = new RunCycleService();
+    await expect(service.run({ repoRoot })).rejects.toThrow(/run-0099|active lease|Active lock/i);
+  });
+
+  it("commits a resumable accepted run from a persisted patch even when the workspace is gone", async () => {
+    const repoRoot = await initFixtureRepo("numeric");
+    const storageRoot = join(repoRoot, ".ralph");
+    const workspaceManager = new GitWorktreeWorkspaceManager(repoRoot, storageRoot);
+    const workspace = await workspaceManager.createWorkspace("candidate-0001", "main");
+
+    await writeFile(join(workspace.workspacePath, "docs", "draft.md"), "Improved draft with stronger structure.\n", "utf8");
+
+    const patchDir = join(storageRoot, "runs", "run-0001", "promotion");
+    const patchPath = join(patchDir, "candidate-0001.patch");
+    await mkdir(patchDir, { recursive: true });
+    await createPromotionPatch(workspace.workspacePath, patchPath);
+    await execa("git", ["apply", "--index", "-p2", patchPath], { cwd: repoRoot });
+    await workspaceManager.cleanupWorkspace("candidate-0001");
+
+    const runStore = new JsonFileRunStore(join(storageRoot, "runs"));
+    const decisionStore = new JsonFileDecisionStore(join(storageRoot, "decisions"));
+
+    await decisionStore.put(makeAcceptedDecisionRecord());
+    await runStore.put(makeAcceptedRunRecord(patchPath));
+
+    const service = new RunCycleService();
+    const result = await service.run({ repoRoot });
+
+    expect(result.status).toBe("accepted");
+    expect(result.runResult?.run.runId).toBe("run-0001");
+
+    const resumedRun = await runStore.get("run-0001");
+    const resumedDecision = await decisionStore.get("decision-run-0001");
+    const { stdout: headSha } = await execa("git", ["rev-parse", "HEAD"], { cwd: repoRoot });
+
+    expect(resumedRun?.phase).toBe("completed");
+    expect(resumedDecision?.commitSha).toBeTruthy();
+    expect(headSha.trim()).toBe(resumedDecision?.commitSha);
+  });
+
+  it("rebuilds the frontier from durable accepted records when the snapshot is missing", async () => {
+    const repoRoot = await initFixtureRepo("numeric");
+    const storageRoot = join(repoRoot, ".ralph");
+    const runStore = new JsonFileRunStore(join(storageRoot, "runs"));
+    const decisionStore = new JsonFileDecisionStore(join(storageRoot, "decisions"));
+
+    await decisionStore.put(makeAcceptedDecisionRecord({
+      commitSha: await gitHeadSha(repoRoot),
+      createdAt: "2026-03-29T00:00:00.000Z",
+    }));
+    await runStore.put(makeCompletedAcceptedRunRecord({
+      metrics: {
+        quality: {
+          metricId: "quality",
+          value: 0.9,
+          direction: "maximize",
+          details: {},
+        },
+      },
+    }));
+
+    const service = new RunCycleService();
+    const result = await service.run({ repoRoot });
+
+    expect(result.status).toBe("rejected");
+
+    const frontierStore = new JsonFileFrontierStore(join(storageRoot, "frontier.json"));
+    const frontier = await frontierStore.load();
+    expect(frontier).toHaveLength(1);
+    expect(frontier[0]?.runId).toBe("run-0001");
+  });
 });
 
 async function initFixtureRepo(
@@ -384,6 +483,102 @@ async function initFixtureRepo(
   await execa("git", ["branch", "-M", "main"], { cwd: repoRoot });
 
   return repoRoot;
+}
+
+async function createPromotionPatch(workspacePath: string, patchPath: string): Promise<void> {
+  const repoRoot = join(workspacePath, "..", "..", "..");
+  const candidateId = workspacePath.split("/").at(-1);
+  if (!candidateId) {
+    throw new Error("workspace path is missing a candidate id");
+  }
+
+  const manager = new GitWorktreeWorkspaceManager(repoRoot, join(repoRoot, ".ralph"));
+  const bundle = await manager.preparePromotionBundle(candidateId, {
+    excludePaths: ["out/draft.md"],
+  });
+  await writeFile(patchPath, bundle.patch, "utf8");
+}
+
+function makeAcceptedDecisionRecord(overrides: Partial<ReturnType<typeof baseAcceptedDecisionRecord>> = {}) {
+  return {
+    ...baseAcceptedDecisionRecord(),
+    ...overrides,
+  };
+}
+
+function baseAcceptedDecisionRecord() {
+  return {
+    decisionId: "decision-run-0001",
+    runId: "run-0001",
+    outcome: "accepted" as const,
+    actorType: "system" as const,
+    policyType: "epsilon_improve",
+    metricId: "quality",
+    reason: "accepted by test",
+    createdAt: "2026-03-29T00:00:00.000Z",
+    frontierChanged: true,
+    beforeFrontierIds: [],
+    afterFrontierIds: ["frontier-run-0001"],
+    auditRequired: false,
+  };
+}
+
+function makeAcceptedRunRecord(patchPath: string) {
+  return {
+    runId: "run-0001",
+    cycle: 1,
+    candidateId: "candidate-0001",
+    status: "accepted" as const,
+    phase: "decision_written" as const,
+    pendingAction: "commit_candidate" as const,
+    startedAt: "2026-03-29T00:00:00.000Z",
+    manifestHash: "manifest-hash",
+    workspaceRef: "main",
+    proposal: {
+      proposerType: "command",
+      summary: "Recovered accepted proposal",
+      operators: [],
+      patchPath,
+      changedPaths: ["docs/draft.md"],
+      diffLines: 3,
+      filesChanged: 1,
+      withinBudget: true,
+    },
+    artifacts: [
+      {
+        id: "draft",
+        path: "out/draft.md",
+      },
+    ],
+    metrics: {
+      quality: {
+        metricId: "quality",
+        value: 0.7,
+        direction: "maximize" as const,
+        details: {},
+      },
+    },
+    constraints: [],
+    decisionId: "decision-run-0001",
+    logs: {},
+  };
+}
+
+function makeCompletedAcceptedRunRecord(
+  overrides: Partial<ReturnType<typeof makeAcceptedRunRecord>> = {},
+) {
+  return {
+    ...makeAcceptedRunRecord("/tmp/already-persisted.patch"),
+    phase: "completed" as const,
+    pendingAction: "none" as const,
+    endedAt: "2026-03-29T00:10:00.000Z",
+    ...overrides,
+  };
+}
+
+async function gitHeadSha(repoRoot: string): Promise<string> {
+  const { stdout } = await execa("git", ["rev-parse", "HEAD"], { cwd: repoRoot });
+  return stdout.trim();
 }
 
 function buildDefaultProposerScript(): string {

@@ -1,4 +1,4 @@
-import { copyFile, mkdir, readdir, realpath, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readdir, realpath, rm } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 
 import { execa } from "execa";
@@ -16,6 +16,14 @@ export interface PromoteWorkspaceResult {
   candidateId: string;
   workspacePath: string;
   copiedPaths: string[];
+  deletedPaths: string[];
+}
+
+export interface PromotionBundle {
+  candidateId: string;
+  workspacePath: string;
+  patch: string;
+  changedPaths: string[];
   deletedPaths: string[];
 }
 
@@ -97,6 +105,52 @@ export class GitWorktreeWorkspaceManager {
       copiedPaths: [...copied].sort(),
       deletedPaths: deletedPaths.sort(),
     };
+  }
+
+  public async preparePromotionBundle(
+    candidateId: string,
+    options: PromoteWorkspaceOptions = {},
+  ): Promise<PromotionBundle> {
+    await this.ensureGitRepo();
+
+    const workspacePath = this.getWorkspacePath(candidateId);
+    const excludedPaths = (options.excludePaths ?? []).map(normalizeRelativePath);
+    const { changedPaths, deletedPaths } = await this.collectWorkspaceChanges(workspacePath, excludedPaths);
+    const tempRoot = await mkdtemp(join(this.ralphRoot, "promotion-"));
+    const repoSnapshotRoot = join(tempRoot, "repo");
+    const candidateSnapshotRoot = join(tempRoot, "candidate");
+
+    await mkdir(repoSnapshotRoot, { recursive: true });
+    await mkdir(candidateSnapshotRoot, { recursive: true });
+
+    try {
+      for (const relativePath of changedPaths) {
+        await copyPathIfPresent(join(this.repoRoot, relativePath), join(repoSnapshotRoot, relativePath));
+        await copyPathIfPresent(join(workspacePath, relativePath), join(candidateSnapshotRoot, relativePath));
+      }
+
+      const diff = await execa(
+        "git",
+        ["diff", "--no-index", "--binary", "--src-prefix=a/", "--dst-prefix=b/", "repo", "candidate"],
+        {
+          cwd: tempRoot,
+          reject: false,
+        },
+      );
+      if (diff.exitCode !== 0 && diff.exitCode !== 1) {
+        throw new Error(diff.stderr || "failed to build promotion patch");
+      }
+
+      return {
+        candidateId,
+        workspacePath,
+        patch: ensureTrailingNewline(diff.stdout),
+        changedPaths,
+        deletedPaths,
+      };
+    } finally {
+      await rm(tempRoot, { recursive: true, force: true });
+    }
   }
 
   public async cleanupWorkspace(candidateId: string): Promise<void> {
@@ -199,8 +253,54 @@ export class GitWorktreeWorkspaceManager {
       throw error;
     }
   }
+
+  private async collectWorkspaceChanges(
+    workspacePath: string,
+    excludedPaths: string[],
+  ): Promise<{
+    changedPaths: string[];
+    deletedPaths: string[];
+  }> {
+    await execa("git", ["-C", workspacePath, "add", "-A", "--", "."]);
+
+    try {
+      if (excludedPaths.length > 0) {
+        await execa("git", ["-C", workspacePath, "reset", "HEAD", "--", ...excludedPaths]);
+      }
+
+      return {
+        changedPaths: await this.readCommandLines(workspacePath, ["diff", "--name-only", "--cached", "HEAD"]),
+        deletedPaths: await this.readCommandLines(
+          workspacePath,
+          ["diff", "--name-only", "--cached", "--diff-filter=D", "HEAD"],
+        ),
+      };
+    } finally {
+      await execa("git", ["-C", workspacePath, "reset", "HEAD", "--", "."]);
+    }
+  }
 }
 
 function normalizeRelativePath(path: string): string {
   return path.replaceAll("\\", "/");
+}
+
+function ensureTrailingNewline(value: string): string {
+  if (value.length === 0 || value.endsWith("\n")) {
+    return value;
+  }
+
+  return `${value}\n`;
+}
+
+async function copyPathIfPresent(sourcePath: string, targetPath: string): Promise<void> {
+  try {
+    await mkdir(dirname(targetPath), { recursive: true });
+    await copyFile(sourcePath, targetPath);
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return;
+    }
+    throw error;
+  }
 }

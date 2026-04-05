@@ -1,11 +1,11 @@
 import {
   pendingActionSchema,
-  runPhaseSchema,
   runRecordSchema,
   type RunPhase,
   type RunRecord,
   type RunStatus,
 } from "../model/run-record.js";
+import { classifyRecovery, derivePendingAction } from "./recovery-classifier.js";
 
 export type PendingAction = RunRecord["pendingAction"];
 
@@ -24,6 +24,7 @@ export interface RecoveryPlan {
 }
 
 const phaseOrder: RunPhase[] = [
+  "started",
   "proposed",
   "executed",
   "evaluated",
@@ -48,7 +49,7 @@ export function advanceRunPhase(
 
   const resolvedPhase = nextIndex === currentIndex ? run.phase : nextPhase;
   const status = options.status ?? inferStatusForPhase(run.status, resolvedPhase);
-  const pendingAction = options.pendingAction ?? inferPendingAction({ ...run, status, phase: resolvedPhase });
+  const pendingAction = options.pendingAction ?? derivePendingAction({ ...run, status, phase: resolvedPhase });
 
   const updated: RunRecord = runRecordSchema.parse({
     ...run,
@@ -68,6 +69,14 @@ export function canResume(run: RunRecord): boolean {
 }
 
 export function recoverRun(run: RunRecord): RecoveryPlan {
+  if (run.status === "needs_human") {
+    return {
+      resumable: false,
+      nextAction: "none",
+      reason: "run is waiting for manual review",
+    };
+  }
+
   if (run.phase === "completed") {
     return {
       resumable: false,
@@ -84,16 +93,22 @@ export function recoverRun(run: RunRecord): RecoveryPlan {
     };
   }
 
-  const nextAction = run.pendingAction !== "none" ? run.pendingAction : inferPendingAction(run);
+  const recovery = classifyRecovery({ latestRun: run });
+  const nextAction = run.pendingAction !== "none"
+    ? run.pendingAction
+    : derivePendingAction(run);
   return {
     resumable: nextAction !== "none",
     nextAction,
-    reason: `resume from phase ${run.phase} with action ${nextAction}`,
+    reason: recovery.classification === "repair_required"
+      ? `resume from ${run.phase} with action ${nextAction}`
+      : recovery.reason,
   };
 }
 
 function inferStatusForPhase(currentStatus: RunStatus, phase: RunPhase): RunStatus {
   switch (phase) {
+    case "started":
     case "proposed":
     case "executed":
       return "running";
@@ -108,25 +123,5 @@ function inferStatusForPhase(currentStatus: RunStatus, phase: RunPhase): RunStat
       return currentStatus;
     case "failed":
       return "failed";
-  }
-}
-
-function inferPendingAction(run: Pick<RunRecord, "phase" | "status" | "pendingAction">): PendingAction {
-  switch (run.phase) {
-    case "proposed":
-      return "execute_experiment";
-    case "executed":
-      return "evaluate_metrics";
-    case "evaluated":
-      return "write_decision";
-    case "decision_written":
-      return run.status === "accepted" ? "commit_candidate" : "cleanup_workspace";
-    case "committed":
-      return "update_frontier";
-    case "frontier_updated":
-      return "cleanup_workspace";
-    case "completed":
-    case "failed":
-      return "none";
   }
 }

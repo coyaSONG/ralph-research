@@ -35,8 +35,10 @@ export async function runInspectCommand(
       io.stdout(
         [
           `run: ${result.run.runId} (${result.run.status})`,
+          `recovery: ${result.recovery.classification} (${result.recovery.nextAction})`,
           `decision: ${result.decision?.outcome ?? "n/a"}`,
           `reason: ${result.explainability.decisionReason ?? "n/a"}`,
+          `recovery reason: ${result.recovery.reason}`,
           `judge rationales: ${result.explainability.judgeRationales.length}`,
         ].join("\n"),
       );

@@ -34,6 +34,7 @@ import { evaluateConstraints } from "../state/constraint-engine.js";
 import { updateParetoFrontier, updateSingleBestFrontier } from "../state/frontier-engine.js";
 import { evaluateRatchet, type RatchetDecision } from "../state/ratchet-engine.js";
 import { advanceRunPhase } from "../state/run-state-machine.js";
+import { derivePendingAction } from "../state/recovery-classifier.js";
 
 export interface CycleRunnerDependencies {
   runStore: RunStore;
@@ -51,6 +52,7 @@ export interface RunCycleInput {
   manifest: RalphManifest;
   resolvedBaselineRef: string;
   currentFrontier: FrontierEntry[];
+  resumeRun?: RunRecord;
 }
 
 export type CycleRunStatus =
@@ -98,6 +100,14 @@ export async function runCycle(
   input: RunCycleInput,
   dependencies: CycleRunnerDependencies,
 ): Promise<CycleRunResult> {
+  if (input.manifest.proposer.type !== "parallel") {
+    return runCommandCycle(input, dependencies);
+  }
+
+  if (input.resumeRun) {
+    throw new Error("parallel proposer runs cannot be resumed truthfully yet");
+  }
+
   const now = dependencies.now ?? (() => new Date());
   const context = await createRunContext(input.repoRoot, input.manifest, dependencies.runStore, now);
   const manifestDir = dirname(input.manifestPath);
@@ -202,10 +212,11 @@ export async function runCycle(
     await dependencies.runStore.put(runRecord);
 
     const decisionId = `decision-${context.runId}`;
+    const decisionCreatedAt = now().toISOString();
     const candidateFrontierEntry = buildFrontierEntry(
       context.runId,
       selectedCandidate.candidateId,
-      now,
+      decisionCreatedAt,
       selectedCandidate.metrics,
       selectedCandidate.artifacts,
     );
@@ -223,13 +234,30 @@ export async function runCycle(
       metricId: ratchetDecision.metricId,
       ...(ratchetDecision.delta === undefined ? {} : { delta: ratchetDecision.delta }),
       reason: ratchetDecision.reason,
-      createdAt: now().toISOString(),
+      createdAt: decisionCreatedAt,
       frontierChanged: frontierUpdate?.comparison.frontierChanged ?? false,
       beforeFrontierIds: frontier.map((entry) => entry.frontierId),
       afterFrontierIds: (frontierUpdate?.entries ?? frontier).map((entry) => entry.frontierId),
       auditRequired: false,
       ...(ratchetDecision.graduation ? { graduation: ratchetDecision.graduation } : {}),
     };
+    if (ratchetDecision.outcome === "accepted") {
+      const promotion = await preparePromotionArtifact({
+        candidateId: selectedCandidate.candidateId,
+        runDir: context.runDir,
+        manifest: input.manifest,
+        workspaceManager: dependencies.workspaceManager,
+      });
+      runRecord = {
+        ...runRecord,
+        proposal: {
+          ...runRecord.proposal,
+          patchPath: promotion.patchPath,
+          changedPaths: promotion.changedPaths,
+          filesChanged: promotion.changedPaths.length,
+        },
+      };
+    }
     let auditQueue = buildAuditQueue(ratchetDecision.metricId, decisionRecord, input.manifest, selectedCandidate.packByMetricId);
     decisionRecord = {
       ...decisionRecord,
@@ -244,11 +272,9 @@ export async function runCycle(
     await dependencies.runStore.put(runRecord);
 
     if (ratchetDecision.outcome === "accepted" && frontierUpdate) {
-      const promoted = await dependencies.workspaceManager.promoteWorkspace(selectedCandidate.candidateId, {
-        excludePaths: input.manifest.experiment.outputs.map((output) => output.path),
-      });
+      await dependencies.gitClient.applyPatchIfNeeded(requirePromotionPatch(runRecord));
       const commitResult = await dependencies.gitClient.stageAndCommitPaths(
-        [...promoted.copiedPaths, ...promoted.deletedPaths],
+        requirePromotionPaths(runRecord),
         `rrx: accept ${context.runId}`,
       );
       decisionRecord = {
@@ -306,6 +332,553 @@ export async function runCycle(
   }
 }
 
+async function runCommandCycle(
+  input: RunCycleInput,
+  dependencies: CycleRunnerDependencies,
+): Promise<CycleRunResult> {
+  const now = dependencies.now ?? (() => new Date());
+  const manifestDir = dirname(input.manifestPath);
+  const referenceMetric = getReferenceMetric(input.manifest);
+  const priorRuns = await dependencies.runStore.list();
+  const priorDecisions = await dependencies.decisionStore.list();
+  const priorConsecutiveAccepts = countConsecutiveAutoAccepts(priorDecisions, {
+    metricId: "metric" in input.manifest.ratchet ? input.manifest.ratchet.metric ?? referenceMetric : referenceMetric,
+  });
+  const context = input.resumeRun
+    ? createRunContextFromRecord(input.repoRoot, input.manifest, input.resumeRun)
+    : await createRunContext(input.repoRoot, input.manifest, dependencies.runStore, now);
+
+  let runRecord = input.resumeRun
+    ? input.resumeRun
+    : createInitialRunRecord(input.manifest, input.resolvedBaselineRef, undefined, context);
+  if (!input.resumeRun) {
+    await dependencies.runStore.put(runRecord);
+  }
+
+  let frontier = input.currentFrontier;
+  let decisionRecord = runRecord.decisionId
+    ? await dependencies.decisionStore.get(runRecord.decisionId)
+    : null;
+  let auditQueue: AuditQueueItem[] = [];
+  let lastChangeBudget: ChangeBudgetDecision | undefined;
+  let lastAnchorCheck: AnchorCheckResult | undefined;
+
+  try {
+    while (true) {
+      const nextAction = runRecord.pendingAction !== "none"
+        ? runRecord.pendingAction
+        : derivePendingAction(runRecord);
+
+      switch (nextAction) {
+        case "prepare_proposal": {
+          const proposerHistory = await buildProposerHistoryContext({
+            manifest: input.manifest,
+            runDir: context.runDir,
+            runs: priorRuns,
+            decisions: priorDecisions,
+            primaryMetric: referenceMetric,
+          });
+          const workspacePath = runRecord.workspacePath
+            ?? (await dependencies.workspaceManager.createWorkspace(runRecord.candidateId, input.resolvedBaselineRef)).workspacePath;
+          const proposal = await executeProposal(
+            input.manifest.proposer as CommandProposerConfig,
+            workspacePath,
+            proposerHistory,
+          );
+          const proposeStdoutPath = await persistText(
+            join(context.runDir, "logs", `${runRecord.candidateId}.propose.stdout.log`),
+            proposal.stdout,
+          );
+
+          runRecord = advanceRunPhase(
+            {
+              ...runRecord,
+              workspacePath,
+              proposal: {
+                ...runRecord.proposal,
+                proposerType: input.manifest.proposer.type,
+                summary: proposerHistory ? `${proposal.summary}; history_context=enabled` : proposal.summary,
+                operators: [],
+              },
+              logs: {
+                ...runRecord.logs,
+                proposeStdoutPath,
+              },
+            },
+            "proposed",
+          );
+          await dependencies.runStore.put(runRecord);
+          break;
+        }
+
+        case "execute_experiment": {
+          const workspacePath = requireWorkspacePath(runRecord);
+          const experiment = await runExperiment(input.manifest.experiment.run, {
+            workspacePath,
+          });
+          const runStdoutPath = await persistText(
+            join(context.runDir, "logs", `${runRecord.candidateId}.experiment.stdout.log`),
+            experiment.stdout,
+          );
+
+          runRecord = advanceRunPhase(
+            {
+              ...runRecord,
+              logs: {
+                ...runRecord.logs,
+                runStdoutPath,
+              },
+            },
+            "executed",
+          );
+          await dependencies.runStore.put(runRecord);
+          break;
+        }
+
+        case "evaluate_metrics": {
+          const workspacePath = requireWorkspacePath(runRecord);
+          const metricEvaluation = await evaluateMetrics({
+            repoRoot: input.repoRoot,
+            manifestDir,
+            manifest: input.manifest,
+            currentFrontier: frontier,
+            workspacePath,
+            runDir: join(context.runDir, "judge", runRecord.candidateId),
+            ...(dependencies.judgeProvider ? { judgeProvider: dependencies.judgeProvider } : {}),
+          });
+          const artifacts = await snapshotArtifacts(
+            input.manifest.experiment.outputs,
+            workspacePath,
+            join(context.runDir, "artifacts", runRecord.candidateId),
+          );
+          const constraints = evaluateConstraints(input.manifest.constraints, metricEvaluation.metrics);
+          const changeBudget = await evaluateChangeBudget({
+            workspacePath,
+            scope: input.manifest.scope,
+          });
+          lastChangeBudget = changeBudget;
+
+          let ratchetDecision = resolveDecision({
+            manifest: input.manifest,
+            metrics: metricEvaluation.metrics,
+            currentFrontier: frontier,
+            constraints,
+            changeBudget,
+            priorConsecutiveAccepts,
+          });
+
+          lastAnchorCheck = undefined;
+          if (ratchetDecision.outcome === "accepted") {
+            lastAnchorCheck = metricEvaluation.anchorChecks.get(ratchetDecision.metricId);
+            if (lastAnchorCheck) {
+              const gated = applyAnchorAgreementGate(ratchetDecision.outcome, lastAnchorCheck);
+              ratchetDecision = {
+                ...ratchetDecision,
+                outcome: gated.outcome,
+                frontierChanged: gated.outcome === "accepted",
+                reason: `${ratchetDecision.reason}; ${gated.reason}`,
+              };
+            }
+          }
+
+          runRecord = advanceRunPhase(
+            {
+              ...runRecord,
+              proposal: {
+                ...runRecord.proposal,
+                diffLines: changeBudget.summary.totalLineDelta,
+                filesChanged: changeBudget.summary.filesChanged,
+                changedPaths: changeBudget.summary.entries.map((entry) => entry.path),
+                withinBudget: changeBudget.withinBudget,
+              },
+              metrics: metricEvaluation.metrics,
+              constraints: constraints.results.map(stripConstraintReason),
+              artifacts,
+            },
+            "evaluated",
+            {
+              status: ratchetDecision.outcome,
+            },
+          );
+          await dependencies.runStore.put(runRecord);
+          break;
+        }
+
+        case "write_decision": {
+          const decisionState = await buildDecisionState({
+            input,
+            dependencies,
+            runRecord,
+            frontier,
+            priorConsecutiveAccepts,
+            manifestDir,
+            runDir: context.runDir,
+          });
+          lastChangeBudget = decisionState.changeBudget;
+          lastAnchorCheck = decisionState.anchorCheck;
+
+          const decisionId = `decision-${runRecord.runId}`;
+          const decisionCreatedAt = now().toISOString();
+          const candidateFrontierEntry = buildFrontierEntry(
+            runRecord.runId,
+            runRecord.candidateId,
+            decisionCreatedAt,
+            runRecord.metrics,
+            runRecord.artifacts,
+          );
+          const frontierUpdate = decisionState.ratchetDecision.outcome === "accepted"
+            ? updateFrontier(input.manifest, frontier, candidateFrontierEntry)
+            : null;
+
+          decisionRecord = {
+            decisionId,
+            runId: runRecord.runId,
+            outcome: decisionState.ratchetDecision.outcome,
+            actorType: "system",
+            policyType: decisionState.ratchetDecision.policyType,
+            metricId: decisionState.ratchetDecision.metricId,
+            ...(decisionState.ratchetDecision.delta === undefined ? {} : { delta: decisionState.ratchetDecision.delta }),
+            reason: decisionState.ratchetDecision.reason,
+            createdAt: decisionCreatedAt,
+            frontierChanged: frontierUpdate?.comparison.frontierChanged ?? false,
+            beforeFrontierIds: frontier.map((entry) => entry.frontierId),
+            afterFrontierIds: (frontierUpdate?.entries ?? frontier).map((entry) => entry.frontierId),
+            auditRequired: false,
+            ...(decisionState.ratchetDecision.graduation ? { graduation: decisionState.ratchetDecision.graduation } : {}),
+          };
+          if (decisionState.ratchetDecision.outcome === "accepted") {
+            const promotion = await preparePromotionArtifact({
+              candidateId: runRecord.candidateId,
+              runDir: context.runDir,
+              manifest: input.manifest,
+              workspaceManager: dependencies.workspaceManager,
+            });
+            runRecord = {
+              ...runRecord,
+              proposal: {
+                ...runRecord.proposal,
+                patchPath: promotion.patchPath,
+                changedPaths: promotion.changedPaths,
+                filesChanged: promotion.changedPaths.length,
+              },
+            };
+          }
+          auditQueue = buildAuditQueue(
+            decisionState.ratchetDecision.metricId,
+            decisionRecord,
+            input.manifest,
+            decisionState.packByMetricId,
+          );
+          decisionRecord = {
+            ...decisionRecord,
+            auditRequired: auditQueue.length > 0,
+          };
+          await dependencies.decisionStore.put(decisionRecord);
+
+          runRecord = advanceRunPhase(runRecord, "decision_written", {
+            status: decisionState.ratchetDecision.outcome,
+            decisionId,
+          });
+          await dependencies.runStore.put(runRecord);
+
+          if (decisionState.ratchetDecision.outcome === "needs_human") {
+            return {
+              status: "needs_human",
+              run: runRecord,
+              decision: decisionRecord,
+              frontier,
+              auditQueue,
+              ...(lastChangeBudget ? { changeBudget: lastChangeBudget } : {}),
+              ...(lastAnchorCheck ? { anchorCheck: lastAnchorCheck } : {}),
+            };
+          }
+          break;
+        }
+
+        case "commit_candidate": {
+          if (runRecord.status !== "accepted") {
+            throw new Error(`cannot commit candidate for non-accepted run ${runRecord.runId}`);
+          }
+          if (!decisionRecord) {
+            decisionRecord = await requireDecisionRecord(dependencies.decisionStore, runRecord);
+          }
+
+          await dependencies.gitClient.applyPatchIfNeeded(requirePromotionPatch(runRecord));
+          const commitResult = await dependencies.gitClient.stageAndCommitPaths(
+            requirePromotionPaths(runRecord),
+            `rrx: accept ${runRecord.runId}`,
+          );
+          decisionRecord = {
+            ...decisionRecord,
+            commitSha: commitResult.commitSha,
+          };
+          await dependencies.decisionStore.put(decisionRecord);
+
+          runRecord = advanceRunPhase(runRecord, "committed");
+          await dependencies.runStore.put(runRecord);
+          break;
+        }
+
+        case "update_frontier": {
+          if (!decisionRecord) {
+            decisionRecord = await requireDecisionRecord(dependencies.decisionStore, runRecord);
+          }
+          if (!decisionRecord.commitSha) {
+            throw new Error(`cannot update frontier for ${runRecord.runId}: missing commit sha`);
+          }
+
+          const candidateFrontierEntry = {
+            ...buildFrontierEntry(
+              runRecord.runId,
+              runRecord.candidateId,
+              decisionRecord.createdAt,
+              runRecord.metrics,
+              runRecord.artifacts,
+            ),
+            commitSha: decisionRecord.commitSha,
+          };
+          frontier = updateFrontier(input.manifest, frontier, candidateFrontierEntry).entries;
+
+          await dependencies.frontierStore.save(frontier);
+          runRecord = advanceRunPhase(runRecord, "frontier_updated");
+          await dependencies.runStore.put(runRecord);
+          break;
+        }
+
+        case "cleanup_workspace": {
+          await dependencies.workspaceManager.cleanupWorkspace(runRecord.candidateId);
+          runRecord = advanceRunPhase(runRecord, "completed", {
+            status: runRecord.status,
+          });
+          await dependencies.runStore.put(runRecord);
+
+          return {
+            status: toCycleRunStatus(runRecord.status),
+            run: runRecord,
+            ...(decisionRecord ? { decision: decisionRecord } : {}),
+            frontier,
+            auditQueue,
+            ...(lastChangeBudget ? { changeBudget: lastChangeBudget } : {}),
+            ...(lastAnchorCheck ? { anchorCheck: lastAnchorCheck } : {}),
+          };
+        }
+
+        case "none": {
+          if (runRecord.status === "needs_human") {
+            return {
+              status: "needs_human",
+              run: runRecord,
+              ...(decisionRecord ? { decision: decisionRecord } : {}),
+              frontier,
+              auditQueue,
+              ...(lastChangeBudget ? { changeBudget: lastChangeBudget } : {}),
+              ...(lastAnchorCheck ? { anchorCheck: lastAnchorCheck } : {}),
+            };
+          }
+
+          if (runRecord.phase === "completed") {
+            return {
+              status: toCycleRunStatus(runRecord.status),
+              run: runRecord,
+              ...(decisionRecord ? { decision: decisionRecord } : {}),
+              frontier,
+              auditQueue,
+              ...(lastChangeBudget ? { changeBudget: lastChangeBudget } : {}),
+              ...(lastAnchorCheck ? { anchorCheck: lastAnchorCheck } : {}),
+            };
+          }
+
+          throw new Error(`run ${runRecord.runId} is missing a resumable next action`);
+        }
+      }
+    }
+  } catch (error) {
+    runRecord = advanceRunPhase(runRecord, "failed", {
+      error: {
+        message: error instanceof Error ? error.message : String(error),
+        ...(error instanceof Error && error.stack ? { stack: error.stack } : {}),
+      },
+      status: "failed",
+    });
+    await dependencies.runStore.put(runRecord);
+
+    return {
+      status: "failed",
+      run: runRecord,
+      frontier,
+      auditQueue: [],
+    };
+  }
+}
+
+function createRunContextFromRecord(
+  repoRoot: string,
+  manifest: RalphManifest,
+  run: RunRecord,
+): RunContext {
+  return {
+    runId: run.runId,
+    cycle: run.cycle,
+    candidateId: run.candidateId,
+    runDir: join(resolve(repoRoot), manifest.storage.root, "runs", run.runId),
+    startedAt: run.startedAt,
+    manifestHash: run.manifestHash,
+  };
+}
+
+async function buildDecisionState(input: {
+  input: RunCycleInput;
+  dependencies: CycleRunnerDependencies;
+  runRecord: RunRecord;
+  frontier: FrontierEntry[];
+  priorConsecutiveAccepts: number;
+  manifestDir: string;
+  runDir: string;
+}): Promise<{
+  ratchetDecision: RatchetDecision;
+  changeBudget: ChangeBudgetDecision;
+  anchorCheck?: AnchorCheckResult;
+  packByMetricId: Map<string, JudgePack>;
+}> {
+  const workspacePath = requireWorkspacePath(input.runRecord);
+  const changeBudget = await evaluateChangeBudget({
+    workspacePath,
+    scope: input.input.manifest.scope,
+  });
+  const constraints = summarizeStoredConstraints(input.runRecord.constraints);
+  const { anchorChecks, packByMetricId } = await evaluateStoredAnchorChecks({
+    manifest: input.input.manifest,
+    manifestDir: input.manifestDir,
+    runDir: input.runDir,
+    ...(input.dependencies.judgeProvider ? { judgeProvider: input.dependencies.judgeProvider } : {}),
+  });
+
+  let ratchetDecision = resolveDecision({
+    manifest: input.input.manifest,
+    metrics: input.runRecord.metrics,
+    currentFrontier: input.frontier,
+    constraints,
+    changeBudget,
+    priorConsecutiveAccepts: input.priorConsecutiveAccepts,
+  });
+
+  let anchorCheck: AnchorCheckResult | undefined;
+  if (ratchetDecision.outcome === "accepted") {
+    anchorCheck = anchorChecks.get(ratchetDecision.metricId);
+    if (anchorCheck) {
+      const gated = applyAnchorAgreementGate(ratchetDecision.outcome, anchorCheck);
+      ratchetDecision = {
+        ...ratchetDecision,
+        outcome: gated.outcome,
+        frontierChanged: gated.outcome === "accepted",
+        reason: `${ratchetDecision.reason}; ${gated.reason}`,
+      };
+    }
+  }
+
+  return {
+    ratchetDecision,
+    changeBudget,
+    ...(anchorCheck ? { anchorCheck } : {}),
+    packByMetricId,
+  };
+}
+
+async function evaluateStoredAnchorChecks(input: {
+  manifest: RalphManifest;
+  manifestDir: string;
+  runDir: string;
+  judgeProvider?: JudgeProvider;
+}): Promise<{
+  anchorChecks: Map<string, AnchorCheckResult>;
+  packByMetricId: Map<string, JudgePack>;
+}> {
+  const anchorChecks = new Map<string, AnchorCheckResult>();
+  const packByMetricId = new Map<string, JudgePack>();
+  const anchorCache = new Map<string, AnchorCheckResult>();
+
+  for (const metricDefinition of input.manifest.metrics.catalog) {
+    if (metricDefinition.extractor.type !== "llm_judge") {
+      continue;
+    }
+    if (!input.judgeProvider) {
+      throw new Error(`metric ${metricDefinition.id} requires a judge provider`);
+    }
+
+    const extractor = metricDefinition.extractor as LlmJudgeMetricExtractorConfig;
+    const pack = getJudgePack(input.manifest, extractor.judgePack);
+    packByMetricId.set(metricDefinition.id, pack);
+
+    if (!anchorCache.has(pack.id)) {
+      const anchors = pack.anchors
+        ? await loadAnchorRecords(resolve(input.manifestDir, pack.anchors.path))
+        : [];
+      anchorCache.set(
+        pack.id,
+        await evaluateAnchorAgreement({
+          pack,
+          extractor,
+          provider: input.judgeProvider,
+          anchors,
+        }),
+      );
+    }
+
+    anchorChecks.set(metricDefinition.id, anchorCache.get(pack.id)!);
+  }
+
+  return {
+    anchorChecks,
+    packByMetricId,
+  };
+}
+
+function summarizeStoredConstraints(
+  constraints: RunRecord["constraints"],
+): { passed: boolean; reason: string } {
+  const failing = constraints.find((constraint) => !constraint.passed);
+  if (!failing) {
+    return {
+      passed: true,
+      reason: "all constraints satisfied",
+    };
+  }
+
+  return {
+    passed: false,
+    reason: `constraint ${failing.metric} failed`,
+  };
+}
+
+async function requireDecisionRecord(
+  decisionStore: DecisionStore,
+  run: RunRecord,
+): Promise<DecisionRecord> {
+  if (!run.decisionId) {
+    throw new Error(`run ${run.runId} is missing a decision id`);
+  }
+  const decision = await decisionStore.get(run.decisionId);
+  if (!decision) {
+    throw new Error(`decision ${run.decisionId} was not found`);
+  }
+  return decision;
+}
+
+function requireWorkspacePath(run: RunRecord): string {
+  if (!run.workspacePath) {
+    throw new Error(`run ${run.runId} is missing a durable workspace path`);
+  }
+  return run.workspacePath;
+}
+
+function toCycleRunStatus(status: RunRecord["status"]): CycleRunStatus {
+  if (status === "accepted" || status === "rejected" || status === "needs_human" || status === "failed") {
+    return status;
+  }
+
+  throw new Error(`run ended without a terminal cycle status: ${status}`);
+}
+
 async function createRunContext(
   repoRoot: string,
   manifest: RalphManifest,
@@ -341,8 +914,8 @@ function createInitialRunRecord(
     cycle: context.cycle,
     candidateId: context.candidateId,
     status: "running",
-    phase: "proposed",
-    pendingAction: "execute_experiment",
+    phase: "started",
+    pendingAction: "prepare_proposal",
     startedAt: context.startedAt,
     manifestHash: context.manifestHash,
     workspaceRef: resolvedBaselineRef,
@@ -803,7 +1376,7 @@ function resolveDecision(input: {
 function buildFrontierEntry(
   runId: string,
   candidateId: string,
-  now: () => Date,
+  acceptedAt: string,
   metrics: Record<string, MetricResult>,
   artifacts: FrontierEntry["artifacts"],
 ): FrontierEntry {
@@ -811,9 +1384,34 @@ function buildFrontierEntry(
     frontierId: `frontier-${runId}`,
     runId,
     candidateId,
-    acceptedAt: now().toISOString(),
+    acceptedAt,
     metrics,
     artifacts,
+  };
+}
+
+async function preparePromotionArtifact(input: {
+  candidateId: string;
+  runDir: string;
+  manifest: RalphManifest;
+  workspaceManager: GitWorktreeWorkspaceManager;
+}): Promise<{
+  patchPath: string;
+  changedPaths: string[];
+}> {
+  const bundle = await input.workspaceManager.preparePromotionBundle(input.candidateId, {
+    excludePaths: input.manifest.experiment.outputs.map((output) => output.path),
+  });
+  if (bundle.changedPaths.length === 0) {
+    throw new Error(`accepted run ${input.candidateId} is missing durable changed-path metadata`);
+  }
+
+  return {
+    patchPath: await persistText(
+      join(input.runDir, "promotion", `${input.candidateId}.patch`),
+      bundle.patch,
+    ),
+    changedPaths: bundle.changedPaths,
   };
 }
 
@@ -934,6 +1532,23 @@ async function persistJson(path: string, value: unknown): Promise<string> {
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   return path;
+}
+
+function requirePromotionPatch(run: RunRecord): string {
+  if (!run.proposal.patchPath) {
+    throw new Error(`run ${run.runId} is missing a durable promotion patch`);
+  }
+
+  return run.proposal.patchPath;
+}
+
+function requirePromotionPaths(run: RunRecord): string[] {
+  const changedPaths = run.proposal.changedPaths?.filter(Boolean) ?? [];
+  if (changedPaths.length === 0) {
+    throw new Error(`run ${run.runId} is missing durable promotion paths`);
+  }
+
+  return changedPaths;
 }
 
 function getJudgePack(manifest: RalphManifest, judgePackId: string): JudgePack {

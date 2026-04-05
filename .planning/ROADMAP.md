@@ -13,8 +13,8 @@ This milestone hardens the existing local-first runtime in the order the trust m
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Contract Truth & Run Admission** - Unsupported manifest/runtime combinations are rejected before a destructive run can start. (completed 2026-04-05)
-- [ ] **Phase 2: Resume Control Plane** - Interrupted runs can resume safely on the same `runId` with truthful recovery state.
-- [ ] **Phase 3: Promotion Durability & Frontier Persistence** - Accepted runs promote changes through a repairable path and keep frontier state rebuildable.
+- [x] **Phase 2: Resume Control Plane** - Interrupted runs can resume safely on the same `runId` with truthful recovery state. (completed 2026-04-05)
+- [x] **Phase 3: Promotion Durability & Frontier Persistence** - Accepted runs promote changes through a repairable path and keep frontier state rebuildable. (completed 2026-04-05)
 - [ ] **Phase 4: Manual Review Semantic Unification** - Human accept/reject decisions preserve the same frontier and read-model semantics as automation.
 - [ ] **Phase 5: Regression Hardening Matrix** - Recovery, contract, promotion, and review guarantees stay protected by automated tests.
 
@@ -45,10 +45,10 @@ Plans:
   4. Operator can recover long-running execution without a stale lock incorrectly allowing another process to take over active work.
 **Plans**: 4 plans
 Plans:
-- [ ] 02-01-PLAN.md - Define the shared recovery classification contract and checkpoint-aligned run state
-- [ ] 02-02-PLAN.md - Implement latest-only same-run resume and the `--fresh` run contract
-- [ ] 02-03-PLAN.md - Unify `status`, `inspect`, and MCP on one recovery read model
-- [ ] 02-04-PLAN.md - Replace the fixed lock TTL with a renewable lease and actionable contention errors
+- [x] 02-01-PLAN.md - Define the shared recovery classification contract and checkpoint-aligned run state
+- [x] 02-02-PLAN.md - Implement latest-only same-run resume and the `--fresh` run contract
+- [x] 02-03-PLAN.md - Unify `status`, `inspect`, and MCP on one recovery read model
+- [x] 02-04-PLAN.md - Replace the fixed lock TTL with a renewable lease and actionable contention errors
 
 ### Phase 3: Promotion Durability & Frontier Persistence
 **Goal**: Accepted runs mutate the repository and frontier through a durable, repairable promotion path.
@@ -58,7 +58,10 @@ Plans:
   1. Operator can accept a run without being left in ambiguous partially committed or partially promoted repository state.
   2. Operator can recover or repair an interrupted promotion path from durable records instead of reconstructing repo state manually.
   3. Operator can rebuild persisted frontier state after crashes or partial failures and get internally consistent frontier data back.
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [x] 03-01-PLAN.md - Persist an accepted-run promotion bundle and replay promotion from a durable patch instead of ad hoc workspace copying
+- [x] 03-02-PLAN.md - Rebuild and self-heal frontier materialization from durable run and decision records
 
 ### Phase 4: Manual Review Semantic Unification
 **Goal**: Manual review uses the same promotion and frontier semantics as automated acceptance and leaves post-decision read models consistent.
@@ -89,7 +92,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Contract Truth & Run Admission | 3/3 | Complete    | 2026-04-05 |
-| 2. Resume Control Plane | 0/4 | Ready to execute | - |
-| 3. Promotion Durability & Frontier Persistence | 0/TBD | Not started | - |
+| 2. Resume Control Plane | 4/4 | Complete | 2026-04-05 |
+| 3. Promotion Durability & Frontier Persistence | 2/2 | Complete | 2026-04-05 |
 | 4. Manual Review Semantic Unification | 0/TBD | Not started | - |
 | 5. Regression Hardening Matrix | 0/TBD | Not started | - |

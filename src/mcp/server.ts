@@ -28,10 +28,10 @@ export function createRalphResearchMcpServer(
         repoRoot: z.string().optional().describe("Repository root; defaults to the server working directory."),
         manifestPath: z.string().optional().describe("Optional path to the manifest file."),
         cycles: z.number().int().min(1).max(20).default(1).describe("Number of cycles to run."),
-        resume: z.boolean().default(false).describe("Resume the latest run if it is recoverable."),
+        fresh: z.boolean().default(false).describe("Start a fresh run instead of auto-resuming the latest recoverable run."),
       },
     },
-    async ({ repoRoot, manifestPath, cycles = 1, resume = false }) => {
+    async ({ repoRoot, manifestPath, cycles = 1, fresh = false }) => {
       const service = new RunCycleService();
       const resolvedRepoRoot = resolve(repoRoot ?? defaultRepoRoot);
       const results = [];
@@ -40,11 +40,11 @@ export function createRalphResearchMcpServer(
         const result = await service.run({
           repoRoot: resolvedRepoRoot,
           ...(manifestPath ? { manifestPath } : {}),
-          resume,
+          fresh,
         });
         results.push(result);
 
-        if (result.status === "failed" || result.status === "resume_required") {
+        if (result.status === "failed") {
           break;
         }
       }
@@ -55,7 +55,7 @@ export function createRalphResearchMcpServer(
             type: "text",
             text: JSON.stringify(
               {
-                ok: results.every((result) => result.status !== "failed" && result.status !== "resume_required"),
+                ok: results.every((result) => result.status !== "failed"),
                 cycles,
                 results,
               },

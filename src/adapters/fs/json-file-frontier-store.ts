@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { frontierEntrySchema, type FrontierEntry } from "../../core/model/frontier-entry.js";
@@ -16,8 +16,10 @@ export class JsonFileFrontierStore implements FrontierStore {
 
   public async save(entries: FrontierEntry[]): Promise<void> {
     const parsed = frontierSnapshotSchema.parse(entries);
+    const tempPath = `${this.path}.tmp-${process.pid}`;
     await mkdir(dirname(this.path), { recursive: true });
-    await writeFile(this.path, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+    await writeFile(tempPath, `${JSON.stringify(parsed, null, 2)}\n`, "utf8");
+    await rename(tempPath, this.path);
   }
 
   public async load(): Promise<FrontierEntry[]> {
@@ -32,4 +34,3 @@ export class JsonFileFrontierStore implements FrontierStore {
     }
   }
 }
-

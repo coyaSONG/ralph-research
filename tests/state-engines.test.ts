@@ -12,8 +12,10 @@ import {
   updateParetoFrontier,
   updateSingleBestFrontier,
 } from "../src/core/state/frontier-engine.js";
+import { classifyRecovery } from "../src/core/state/recovery-classifier.js";
 import { evaluateRatchet } from "../src/core/state/ratchet-engine.js";
 import { advanceRunPhase, canResume, recoverRun } from "../src/core/state/run-state-machine.js";
+import type { DecisionRecord } from "../src/core/model/decision-record.js";
 import type { FrontierEntry } from "../src/core/model/frontier-entry.js";
 import type { MetricResult } from "../src/core/model/metric.js";
 import type { RunRecord } from "../src/core/model/run-record.js";
@@ -88,6 +90,24 @@ function makeRunRecord(overrides: Partial<RunRecord> = {}): RunRecord {
     metrics: {},
     constraints: [],
     logs: {},
+    ...overrides,
+  };
+}
+
+function makeDecisionRecord(overrides: Partial<DecisionRecord> = {}): DecisionRecord {
+  return {
+    decisionId: "decision-001",
+    runId: "run-001",
+    outcome: "accepted",
+    actorType: "system",
+    policyType: "epsilon_improve",
+    metricId: "quality",
+    reason: "accepted by test",
+    createdAt: "2026-03-29T00:00:00.000Z",
+    frontierChanged: true,
+    beforeFrontierIds: [],
+    afterFrontierIds: ["frontier-run-001"],
+    auditRequired: false,
     ...overrides,
   };
 }
@@ -367,6 +387,84 @@ describe("ratchet-engine", () => {
 });
 
 describe("run-state-machine", () => {
+  it("classifies the absence of a latest run as idle", () => {
+    expect(classifyRecovery({ latestRun: null })).toMatchObject({
+      classification: "idle",
+      nextAction: "none",
+      resumeAllowed: false,
+    });
+  });
+
+  it("classifies a replay-safe latest checkpoint as resumable", () => {
+    const latestRun = makeRunRecord({
+      phase: "proposed",
+      pendingAction: "execute_experiment",
+    });
+
+    expect(classifyRecovery({ latestRun })).toMatchObject({
+      classification: "resumable",
+      nextAction: "execute_experiment",
+      resumeAllowed: true,
+    });
+  });
+
+  it("classifies needs_human runs as manual_review_blocked", () => {
+    const latestRun = makeRunRecord({
+      phase: "decision_written",
+      status: "needs_human",
+      decisionId: "decision-001",
+      pendingAction: "none",
+    });
+
+    expect(classifyRecovery({ latestRun, decision: makeDecisionRecord({ outcome: "needs_human" }) })).toMatchObject({
+      classification: "manual_review_blocked",
+      nextAction: "none",
+      resumeAllowed: false,
+    });
+  });
+
+  it("classifies accepted decision checkpoints without a durable patch as repair_required", () => {
+    const { patchPath: _ignored, ...proposalWithoutPatch } = makeRunRecord().proposal;
+    const latestRun = makeRunRecord({
+      phase: "decision_written",
+      status: "accepted",
+      decisionId: "decision-001",
+      pendingAction: "commit_candidate",
+      proposal: proposalWithoutPatch,
+    });
+
+    expect(classifyRecovery({ latestRun, decision: makeDecisionRecord() })).toMatchObject({
+      classification: "repair_required",
+      nextAction: "none",
+      resumeAllowed: false,
+    });
+  });
+
+  it("classifies contradictory accepted-path evidence as repair_required", () => {
+    const latestRun = makeRunRecord({
+      phase: "committed",
+      status: "accepted",
+      decisionId: "decision-001",
+      pendingAction: "update_frontier",
+    });
+    const decision = makeDecisionRecord({
+      commitSha: "abc123",
+    });
+    const frontier = [
+      makeFrontierEntry("frontier-run-001", makeMetric("quality", 0.9, "maximize")),
+    ];
+    frontier[0] = {
+      ...frontier[0]!,
+      runId: latestRun.runId,
+      candidateId: latestRun.candidateId,
+    };
+
+    expect(classifyRecovery({ latestRun, decision, frontier })).toMatchObject({
+      classification: "repair_required",
+      resumeAllowed: false,
+    });
+  });
+
   it("advances phases idempotently without regressing", () => {
     const run = makeRunRecord();
     const executed = advanceRunPhase(run, "executed");
