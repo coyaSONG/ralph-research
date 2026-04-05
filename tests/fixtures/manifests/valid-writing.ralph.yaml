@@ -7,11 +7,8 @@ scope:
     - docs/**/*.md
     - prompts/**/*.md
 proposer:
-  type: operator_llm
-  model: openai:gpt-5.4-mini
-  prompt: prompts/proposer.md
-  operators:
-    - strengthen_claim_evidence
+  type: command
+  command: ./scripts/propose_review.sh
 experiment:
   run:
     command: ./scripts/build_review.sh

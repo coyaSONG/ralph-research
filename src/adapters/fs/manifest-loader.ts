@@ -4,6 +4,7 @@ import { resolve } from "node:path";
 import { parse } from "yaml";
 import { ZodError } from "zod";
 
+import { compileManifestAdmission } from "../../core/manifest/admission.js";
 import { DEFAULT_MANIFEST_FILENAME, RalphManifestSchema, type RalphManifest } from "../../core/manifest/schema.js";
 
 export interface LoadedManifest {
@@ -21,7 +22,14 @@ export class ManifestLoadError extends Error {
   }
 }
 
-export async function loadManifestFromFile(path = DEFAULT_MANIFEST_FILENAME): Promise<LoadedManifest> {
+export interface LoadManifestOptions {
+  repoRoot?: string;
+}
+
+export async function loadManifestFromFile(
+  path = DEFAULT_MANIFEST_FILENAME,
+  options: LoadManifestOptions = {},
+): Promise<LoadedManifest> {
   const resolvedPath = resolve(path);
 
   let rawText: string;
@@ -39,11 +47,25 @@ export async function loadManifestFromFile(path = DEFAULT_MANIFEST_FILENAME): Pr
   }
 
   try {
+    const manifest = RalphManifestSchema.parse(parsedYaml);
+    const admission = await compileManifestAdmission(manifest, options);
+
+    if (!admission.executable) {
+      throw new ManifestLoadError(`Manifest admission failed for ${resolvedPath}`, {
+        executable: false,
+        issues: admission.issues,
+      });
+    }
+
     return {
       path: resolvedPath,
-      manifest: RalphManifestSchema.parse(parsedYaml),
+      manifest,
     };
   } catch (error) {
+    if (error instanceof ManifestLoadError) {
+      throw error;
+    }
+
     if (error instanceof ZodError) {
       throw new ManifestLoadError(`Manifest validation failed for ${resolvedPath}`, error.flatten());
     }

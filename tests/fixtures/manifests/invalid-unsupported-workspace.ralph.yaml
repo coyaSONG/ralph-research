@@ -1,24 +1,27 @@
 schemaVersion: "0.1"
 project:
-  name: missing-judge-pack
-  artifact: manuscript
+  name: invalid-workspace
+  artifact: code
+  workspace: copy
 proposer:
   type: command
   command: ./scripts/propose.sh
 experiment:
   run:
-    command: ./scripts/build.sh
+    command: ./scripts/run.sh
 metrics:
   catalog:
     - id: quality
-      kind: llm_score
+      kind: numeric
       direction: maximize
       extractor:
-        type: llm_judge
-        judgePack: does-not-exist
-        prompt: prompts/judge.md
+        type: command
+        command: ./scripts/metric.sh
+        parser: plain_number
 frontier:
   strategy: single_best
   primaryMetric: quality
 ratchet:
-  type: approval_gate
+  type: epsilon_improve
+  metric: quality
+  epsilon: 0

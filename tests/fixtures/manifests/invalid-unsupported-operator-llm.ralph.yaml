@@ -1,0 +1,29 @@
+schemaVersion: "0.1"
+project:
+  name: invalid-operator
+  artifact: manuscript
+proposer:
+  type: operator_llm
+  model: openai:gpt-5.4-mini
+  prompt: prompts/proposer.md
+  operators:
+    - strengthen_claim_evidence
+experiment:
+  run:
+    command: ./scripts/build_review.sh
+metrics:
+  catalog:
+    - id: quality
+      kind: numeric
+      direction: maximize
+      extractor:
+        type: command
+        command: ./scripts/metric.sh
+        parser: plain_number
+frontier:
+  strategy: single_best
+  primaryMetric: quality
+ratchet:
+  type: epsilon_improve
+  metric: quality
+  epsilon: 0
