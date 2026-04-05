@@ -255,17 +255,17 @@ Source: Vitest documents file filtering and `file:line` execution. [CITED: https
 
 All material claims in this research were verified from the codebase, local environment, npm registry, or official docs in this session. No user-confirmation assumptions are currently blocking planning.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **How narrowly should Phase 2 interpret "resume after interruption during commit"?**
    - What we know: The current accepted path promotes workspace files into the repo, commits, saves frontier state, and cleans up in one sequence, and that sequence is not transactional today. [VERIFIED: codebase grep]
-   - What's unclear: Whether the planner should treat mid-promotion/mid-commit ambiguity as `repair_required` in Phase 2 or add a minimal replay-safe acceptance checkpoint now.
-   - Recommendation: Keep Phase 2 narrow and truthful: resume from durable post-decision, post-commit, and post-frontier checkpoints when evidence exists; classify ambiguous accepted-path partials as `repair_required`; move transactional repairability to Phase 3.
+   - Resolution: Phase 2 stays narrow and truthful. Resume is supported for accepted-path checkpoints only when durable evidence already proves the run reached `decision_written`, `committed`, or `frontier_updated`; ambiguous mid-promotion or mid-commit state is classified as `repair_required` and not auto-replayed.
+   - Planning impact: Plan 02-02 must include explicit accepted-path checkpoint coverage for `committed -> update_frontier` and `frontier_updated -> cleanup_workspace`, while leaving transactional repairability to Phase 3.
 
 2. **Should the repo add a new initial phase or repurpose `proposed`?**
    - What we know: Current code writes `phase: "proposed"` before proposal work has happened. [VERIFIED: codebase grep]
-   - What's unclear: Whether the least risky brownfield move is adding a new phase (`started`/`admitted`) or renaming the current early-phase semantics.
-   - Recommendation: Add a new initial phase rather than redefining `proposed`, because the rest of the pipeline already interprets `proposed -> execute_experiment`. [VERIFIED: codebase grep]
+   - Resolution: Add a new initial checkpoint phase such as `started` or `admitted` rather than redefining `proposed`, because the rest of the pipeline already interprets `proposed -> execute_experiment`. [VERIFIED: codebase grep]
+   - Planning impact: Plan 02-01 should update the run schema/state machine so persisted phases describe the last durable boundary completed instead of in-flight work.
 
 ## Environment Availability
 

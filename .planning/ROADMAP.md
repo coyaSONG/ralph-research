@@ -43,7 +43,12 @@ Plans:
   2. Operator can resume from the last durable execution step after interruption during proposal, experiment, evaluation, decision writing, commit, or frontier update.
   3. Operator can inspect stable `status` and `inspect` output that labels a run as resumable, blocked for manual review, or in need of repair.
   4. Operator can recover long-running execution without a stale lock incorrectly allowing another process to take over active work.
-**Plans**: TBD
+**Plans**: 4 plans
+Plans:
+- [ ] 02-01-PLAN.md - Define the shared recovery classification contract and checkpoint-aligned run state
+- [ ] 02-02-PLAN.md - Implement latest-only same-run resume and the `--fresh` run contract
+- [ ] 02-03-PLAN.md - Unify `status`, `inspect`, and MCP on one recovery read model
+- [ ] 02-04-PLAN.md - Replace the fixed lock TTL with a renewable lease and actionable contention errors
 
 ### Phase 3: Promotion Durability & Frontier Persistence
 **Goal**: Accepted runs mutate the repository and frontier through a durable, repairable promotion path.
@@ -84,7 +89,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Contract Truth & Run Admission | 3/3 | Complete    | 2026-04-05 |
-| 2. Resume Control Plane | 0/TBD | Not started | - |
+| 2. Resume Control Plane | 0/4 | Ready to execute | - |
 | 3. Promotion Durability & Frontier Persistence | 0/TBD | Not started | - |
 | 4. Manual Review Semantic Unification | 0/TBD | Not started | - |
 | 5. Regression Hardening Matrix | 0/TBD | Not started | - |
