@@ -28,7 +28,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   1. Operator can run validation or doctor checks and see unsupported proposer, workspace, or baseline declarations rejected before any repo mutation starts.
   2. Operator can rely on every supported manifest field to change runtime behavior exactly as documented instead of being silently ignored.
   3. Operator can distinguish executable manifests from capability-mismatched manifests through a stable preflight surface before starting a run.
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 01-01-PLAN.md - Define the shared manifest admission contract and unsupported-surface rejection matrix
+- [ ] 01-02-PLAN.md - Enforce baseline-aware run admission before workspace and run-state mutation
+- [ ] 01-03-PLAN.md - Unify doctor and validate preflight on the shared admission gate
 
 ### Phase 2: Resume Control Plane
 **Goal**: Operators can resume interrupted work on the same run safely and know whether a run is resumable, manual-review-blocked, or repair-required.
@@ -79,7 +83,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Contract Truth & Run Admission | 0/TBD | Not started | - |
+| 1. Contract Truth & Run Admission | 0/3 | Not started | - |
 | 2. Resume Control Plane | 0/TBD | Not started | - |
 | 3. Promotion Durability & Frontier Persistence | 0/TBD | Not started | - |
 | 4. Manual Review Semantic Unification | 0/TBD | Not started | - |
