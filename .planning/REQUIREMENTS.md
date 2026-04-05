@@ -63,28 +63,28 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| RECV-01 | TBD | Pending |
-| RECV-02 | TBD | Pending |
-| RECV-03 | TBD | Pending |
-| RECV-04 | TBD | Pending |
-| CONT-01 | TBD | Pending |
-| CONT-02 | TBD | Pending |
-| CONT-03 | TBD | Pending |
-| REVW-01 | TBD | Pending |
-| REVW-02 | TBD | Pending |
-| REVW-03 | TBD | Pending |
-| REVW-04 | TBD | Pending |
-| STAB-01 | TBD | Pending |
-| STAB-02 | TBD | Pending |
-| STAB-03 | TBD | Pending |
-| STAB-04 | TBD | Pending |
-| STAB-05 | TBD | Pending |
+| RECV-01 | Phase 2 | Pending |
+| RECV-02 | Phase 2 | Pending |
+| RECV-03 | Phase 2 | Pending |
+| RECV-04 | Phase 2 | Pending |
+| CONT-01 | Phase 1 | Pending |
+| CONT-02 | Phase 1 | Pending |
+| CONT-03 | Phase 1 | Pending |
+| REVW-01 | Phase 4 | Pending |
+| REVW-02 | Phase 4 | Pending |
+| REVW-03 | Phase 4 | Pending |
+| REVW-04 | Phase 4 | Pending |
+| STAB-01 | Phase 3 | Pending |
+| STAB-02 | Phase 3 | Pending |
+| STAB-03 | Phase 5 | Pending |
+| STAB-04 | Phase 5 | Pending |
+| STAB-05 | Phase 5 | Pending |
 
 **Coverage:**
 - v1 requirements: 16 total
-- Mapped to phases: 0
-- Unmapped: 16 ⚠️
+- Mapped to phases: 16
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-04-05*
-*Last updated: 2026-04-05 after initial definition*
+*Last updated: 2026-04-05 after roadmap creation*
