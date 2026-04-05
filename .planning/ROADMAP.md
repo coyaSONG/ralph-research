@@ -12,7 +12,7 @@ This milestone hardens the existing local-first runtime in the order the trust m
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Contract Truth & Run Admission** - Unsupported manifest/runtime combinations are rejected before a destructive run can start.
+- [x] **Phase 1: Contract Truth & Run Admission** - Unsupported manifest/runtime combinations are rejected before a destructive run can start. (completed 2026-04-05)
 - [ ] **Phase 2: Resume Control Plane** - Interrupted runs can resume safely on the same `runId` with truthful recovery state.
 - [ ] **Phase 3: Promotion Durability & Frontier Persistence** - Accepted runs promote changes through a repairable path and keep frontier state rebuildable.
 - [ ] **Phase 4: Manual Review Semantic Unification** - Human accept/reject decisions preserve the same frontier and read-model semantics as automation.
@@ -30,9 +30,9 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. Operator can distinguish executable manifests from capability-mismatched manifests through a stable preflight surface before starting a run.
 **Plans**: 3 plans
 Plans:
-- [ ] 01-01-PLAN.md - Define the shared manifest admission contract and unsupported-surface rejection matrix
-- [ ] 01-02-PLAN.md - Enforce baseline-aware run admission before workspace and run-state mutation
-- [ ] 01-03-PLAN.md - Unify doctor and validate preflight on the shared admission gate
+- [x] 01-01-PLAN.md - Define the shared manifest admission contract and unsupported-surface rejection matrix
+- [x] 01-02-PLAN.md - Enforce baseline-aware run admission before workspace and run-state mutation
+- [x] 01-03-PLAN.md - Unify doctor and validate preflight on the shared admission gate
 
 ### Phase 2: Resume Control Plane
 **Goal**: Operators can resume interrupted work on the same run safely and know whether a run is resumable, manual-review-blocked, or repair-required.
@@ -83,7 +83,7 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Contract Truth & Run Admission | 0/3 | Not started | - |
+| 1. Contract Truth & Run Admission | 3/3 | Complete    | 2026-04-05 |
 | 2. Resume Control Plane | 0/TBD | Not started | - |
 | 3. Promotion Durability & Frontier Persistence | 0/TBD | Not started | - |
 | 4. Manual Review Semantic Unification | 0/TBD | Not started | - |
