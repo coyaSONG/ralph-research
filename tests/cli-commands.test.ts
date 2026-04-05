@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -11,6 +11,7 @@ import { JsonFileRunStore } from "../src/adapters/fs/json-file-run-store.js";
 import type { JudgeProvider, JudgeRequest, JudgeResponse } from "../src/adapters/judge/llm-judge-provider.js";
 import { RunCycleService } from "../src/app/services/run-cycle-service.js";
 import { runAcceptCommand } from "../src/cli/commands/accept.js";
+import { runDoctorCommand } from "../src/cli/commands/doctor.js";
 import { runFrontierCommand } from "../src/cli/commands/frontier.js";
 import { runInspectCommand } from "../src/cli/commands/inspect.js";
 import { runRunCommand } from "../src/cli/commands/run.js";
@@ -208,6 +209,87 @@ describe("CLI commands", () => {
     expect(headSha.trim()).toBe(decision?.commitSha);
     expect(committedPaths.trim().split("\n")).toEqual(["docs/draft.md"]);
   });
+
+  it("reports doctor success for executable manifests and blocks unsupported workspace manifests", async () => {
+    const executableRepo = await initFixtureRepo("numeric");
+    process.chdir(executableRepo);
+
+    const executableIo = createCapturingIo();
+    const executableExitCode = await runDoctorCommand({ json: true }, executableIo);
+
+    expect(executableExitCode).toBe(0);
+    expect(JSON.parse(executableIo.stdoutText())).toMatchObject({
+      ok: true,
+      executable: true,
+    });
+
+    const blockedRepo = await initFixtureRepo("numeric", { workspace: "copy" });
+    process.chdir(blockedRepo);
+
+    const blockedIo = createCapturingIo();
+    const blockedExitCode = await runDoctorCommand({ json: true }, blockedIo);
+
+    expect(blockedExitCode).toBe(1);
+    expect(JSON.parse(blockedIo.stderrText())).toMatchObject({
+      ok: false,
+      executable: false,
+      details: {
+        issues: [
+          expect.objectContaining({
+            path: ["project", "workspace"],
+          }),
+        ],
+      },
+    });
+  });
+
+  it("makes run abort unsupported manifests without side effects", async () => {
+    const repoRoot = await initFixtureRepo("numeric", { workspace: "copy" });
+    process.chdir(repoRoot);
+
+    const io = createCapturingIo();
+    const exitCode = await runRunCommand({ cycles: 1, json: true }, io);
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(io.stderrText())).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("Manifest admission failed"),
+    });
+    await expect(pathExists(join(repoRoot, ".ralph", "lock"))).resolves.toBe(false);
+    await expect(pathExists(join(repoRoot, ".ralph", "runs"))).resolves.toBe(false);
+    await expect(pathExists(join(repoRoot, ".ralph", "workspaces"))).resolves.toBe(false);
+  });
+
+  it("makes doctor and run agree on unresolved baseline refs", async () => {
+    const repoRoot = await initFixtureRepo("numeric", { baselineRef: "does-not-exist" });
+    process.chdir(repoRoot);
+
+    const doctorIo = createCapturingIo();
+    const doctorExitCode = await runDoctorCommand({ json: true }, doctorIo);
+    expect(doctorExitCode).toBe(1);
+    expect(JSON.parse(doctorIo.stderrText())).toMatchObject({
+      ok: false,
+      executable: false,
+      details: {
+        issues: [
+          expect.objectContaining({
+            path: ["project", "baselineRef"],
+          }),
+        ],
+      },
+    });
+
+    const runIo = createCapturingIo();
+    const runExitCode = await runRunCommand({ cycles: 1, json: true }, runIo);
+    expect(runExitCode).toBe(1);
+    expect(JSON.parse(runIo.stderrText())).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("Manifest admission failed"),
+    });
+    await expect(pathExists(join(repoRoot, ".ralph", "lock"))).resolves.toBe(false);
+    await expect(pathExists(join(repoRoot, ".ralph", "runs"))).resolves.toBe(false);
+    await expect(pathExists(join(repoRoot, ".ralph", "workspaces"))).resolves.toBe(false);
+  });
 });
 
 function createCapturingIo() {
@@ -226,7 +308,14 @@ function createCapturingIo() {
   };
 }
 
-async function initFixtureRepo(mode: "numeric" | "judge"): Promise<string> {
+async function initFixtureRepo(
+  mode: "numeric" | "judge",
+  options: {
+    baselineRef?: string;
+    workspace?: "git" | "copy";
+    proposerType?: "command" | "operator_llm";
+  } = {},
+): Promise<string> {
   const repoRoot = join(tempRoot, `repo-${mode}`);
   await mkdir(join(repoRoot, "docs"), { recursive: true });
   await mkdir(join(repoRoot, "scripts"), { recursive: true });
@@ -262,33 +351,53 @@ async function initFixtureRepo(mode: "numeric" | "judge"): Promise<string> {
 
   if (mode === "numeric") {
     await writeFile(join(repoRoot, "scripts", "metric.mjs"), 'console.log("0.7");\n', "utf8");
-    await writeFile(join(repoRoot, "ralph.yaml"), buildNumericManifest(), "utf8");
+    await writeFile(join(repoRoot, "ralph.yaml"), buildNumericManifest(options), "utf8");
   } else {
-    await writeFile(join(repoRoot, "ralph.yaml"), buildJudgeManifest(), "utf8");
+    await writeFile(join(repoRoot, "ralph.yaml"), buildJudgeManifest(options), "utf8");
   }
 
   await execa("git", ["add", "."], { cwd: repoRoot });
   await execa("git", ["commit", "-m", "fixture"], { cwd: repoRoot });
+  await execa("git", ["branch", "-M", "main"], { cwd: repoRoot });
 
   return repoRoot;
 }
 
-function buildNumericManifest(): string {
+function buildNumericManifest(
+  options: {
+    baselineRef?: string;
+    workspace?: "git" | "copy";
+    proposerType?: "command" | "operator_llm";
+  } = {},
+): string {
+  const proposerLines =
+    options.proposerType === "operator_llm"
+      ? [
+          "proposer:",
+          "  type: operator_llm",
+          "  model: fake-model",
+          "  prompt: prompts/judge.md",
+          "  operators:",
+          "    - strengthen_claim_evidence",
+        ]
+      : [
+          "proposer:",
+          "  type: command",
+          '  command: "node scripts/propose.mjs"',
+        ];
   return [
     'schemaVersion: "0.1"',
     "project:",
     "  name: cli-numeric",
     "  artifact: manuscript",
-    "  baselineRef: main",
-    "  workspace: git",
+    `  baselineRef: ${options.baselineRef ?? "main"}`,
+    `  workspace: ${options.workspace ?? "git"}`,
     "scope:",
     "  allowedGlobs:",
     '    - "**/*.md"',
     "  maxFilesChanged: 2",
     "  maxLineDelta: 20",
-    "proposer:",
-    "  type: command",
-    '  command: "node scripts/propose.mjs"',
+    ...proposerLines,
     "experiment:",
     "  run:",
     '    command: "node scripts/experiment.mjs"',
@@ -318,14 +427,14 @@ function buildNumericManifest(): string {
   ].join("\n");
 }
 
-function buildJudgeManifest(): string {
+function buildJudgeManifest(options: { baselineRef?: string; workspace?: "git" | "copy" } = {}): string {
   return [
     'schemaVersion: "0.1"',
     "project:",
     "  name: cli-judge",
     "  artifact: manuscript",
-    "  baselineRef: main",
-    "  workspace: git",
+    `  baselineRef: ${options.baselineRef ?? "main"}`,
+    `  workspace: ${options.workspace ?? "git"}`,
     "scope:",
     "  allowedGlobs:",
     '    - "**/*.md"',
@@ -405,4 +514,13 @@ function pairwise(winner: "candidate" | "incumbent" | "tie", confidence?: number
     raw: JSON.stringify({ winner, confidence }),
     ...(confidence === undefined ? {} : { confidence }),
   };
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }

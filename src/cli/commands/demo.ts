@@ -133,4 +133,5 @@ async function initializeDemoRepo(repoRoot: string): Promise<void> {
   await execa("git", ["config", "user.email", "demo@example.com"], { cwd: repoRoot });
   await execa("git", ["add", "."], { cwd: repoRoot });
   await execa("git", ["commit", "-m", "demo fixture"], { cwd: repoRoot });
+  await execa("git", ["branch", "-M", "main"], { cwd: repoRoot });
 }

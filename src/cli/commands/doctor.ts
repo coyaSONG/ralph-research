@@ -2,18 +2,14 @@ import type { Command } from "commander";
 
 import { getRunAdmission } from "../../app/services/run-admission-service.js";
 import { DEFAULT_MANIFEST_FILENAME } from "../../core/manifest/schema.js";
+import type { CommandIO } from "./run.js";
 
-export interface ValidateCommandOptions {
-  path: string;
+export interface DoctorCommandOptions {
+  path?: string;
   json?: boolean;
 }
 
-export interface ValidateCommandIO {
-  stdout(message: string): void;
-  stderr(message: string): void;
-}
-
-const defaultValidateCommandIO: ValidateCommandIO = {
+const defaultCommandIO: CommandIO = {
   stdout: (message) => {
     process.stdout.write(`${message}\n`);
   },
@@ -22,21 +18,21 @@ const defaultValidateCommandIO: ValidateCommandIO = {
   },
 };
 
-export async function runValidateCommand(
-  options: ValidateCommandOptions,
-  io: ValidateCommandIO = defaultValidateCommandIO,
+export async function runDoctorCommand(
+  options: DoctorCommandOptions,
+  io: CommandIO = defaultCommandIO,
 ): Promise<number> {
   try {
     const admission = await getRunAdmission({
       repoRoot: process.cwd(),
-      manifestPath: options.path,
+      ...(options.path ? { manifestPath: options.path } : {}),
     });
 
     if (admission.ok) {
       if (options.json) {
         io.stdout(JSON.stringify(admission, null, 2));
       } else {
-        io.stdout(`Manifest is executable: ${admission.path}`);
+        io.stdout(`Doctor: manifest is executable: ${admission.path}`);
       }
       return 0;
     }
@@ -45,11 +41,11 @@ export async function runValidateCommand(
       io.stderr(JSON.stringify(admission, null, 2));
     } else {
       const details = admission.details ? `\n${JSON.stringify(admission.details, null, 2)}` : "";
-      io.stderr(`${admission.error}${details}`);
+      io.stderr(`Doctor: manifest is blocked: ${admission.path}\n${admission.error}${details}`);
     }
     return 1;
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown validation error";
+    const message = error instanceof Error ? error.message : "Failed to inspect manifest admission";
     if (options.json) {
       io.stderr(JSON.stringify({ ok: false, executable: false, error: message }, null, 2));
     } else {
@@ -59,14 +55,14 @@ export async function runValidateCommand(
   }
 }
 
-export function registerValidateCommand(program: Command): void {
+export function registerDoctorCommand(program: Command): void {
   program
-    .command("validate")
-    .description("Validate a ralph-research manifest.")
+    .command("doctor")
+    .description("Show whether the current manifest is executable or blocked before run.")
     .option("-p, --path <path>", "Path to the manifest file", DEFAULT_MANIFEST_FILENAME)
     .option("--json", "Emit machine-readable output", false)
-    .action(async (options: ValidateCommandOptions) => {
-      const exitCode = await runValidateCommand(options);
+    .action(async (options: DoctorCommandOptions) => {
+      const exitCode = await runDoctorCommand(options);
       if (exitCode !== 0) {
         process.exitCode = exitCode;
       }

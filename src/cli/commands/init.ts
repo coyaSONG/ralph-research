@@ -91,6 +91,7 @@ async function ensureRunnableGitRepo(repoRoot: string, message: string): Promise
   if (!hasHead) {
     await execa("git", ["add", "."], { cwd: repoRoot });
     await execa("git", ["commit", "-m", message], { cwd: repoRoot });
+    await execa("git", ["branch", "-M", "main"], { cwd: repoRoot });
   }
 
   return !insideGitRepo || !hasHead;
