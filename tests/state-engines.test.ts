@@ -440,7 +440,7 @@ describe("run-state-machine", () => {
     });
   });
 
-  it("classifies contradictory accepted-path evidence as repair_required", () => {
+  it("keeps committed accepted checkpoints resumable even when frontier materialization already includes the run", () => {
     const latestRun = makeRunRecord({
       phase: "committed",
       status: "accepted",
@@ -460,8 +460,9 @@ describe("run-state-machine", () => {
     };
 
     expect(classifyRecovery({ latestRun, decision, frontier })).toMatchObject({
-      classification: "repair_required",
-      resumeAllowed: false,
+      classification: "resumable",
+      nextAction: "update_frontier",
+      resumeAllowed: true,
     });
   });
 
@@ -526,6 +527,32 @@ describe("run-state-machine", () => {
     expect(recoverRun(loaded!)).toMatchObject({
       resumable: true,
       nextAction: "update_frontier",
+    });
+  });
+
+  it("recovers a run interrupted after frontier_updated by resuming workspace cleanup", async () => {
+    const store = new JsonFileRunStore(join(tempRoot, "runs"));
+    const frontierUpdated = advanceRunPhase(
+      makeRunRecord({
+        phase: "committed",
+        status: "accepted",
+        decisionId: "decision-001",
+        pendingAction: "update_frontier",
+      }),
+      "frontier_updated",
+      {
+        status: "accepted",
+      },
+    );
+
+    await store.put(frontierUpdated);
+    const loaded = await store.get(frontierUpdated.runId);
+
+    expect(loaded).not.toBeNull();
+    expect(canResume(loaded!)).toBe(true);
+    expect(recoverRun(loaded!)).toMatchObject({
+      resumable: true,
+      nextAction: "cleanup_workspace",
     });
   });
 });

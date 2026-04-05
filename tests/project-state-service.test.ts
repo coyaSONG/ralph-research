@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { JsonFileDecisionStore } from "../src/adapters/fs/json-file-decision-store.js";
 import { JsonFileFrontierStore } from "../src/adapters/fs/json-file-frontier-store.js";
 import { JsonFileRunStore } from "../src/adapters/fs/json-file-run-store.js";
+import { ManualDecisionService } from "../src/app/services/manual-decision-service.js";
 import { getProjectStatus, inspectRun } from "../src/app/services/project-state-service.js";
 import { GitWorktreeWorkspaceManager } from "../src/core/engine/workspace-manager.js";
 import type { DecisionRecord } from "../src/core/model/decision-record.js";
@@ -139,6 +140,72 @@ describe("project-state-service recovery read model", () => {
     expect(status.frontier[0]?.runId).toBe("run-0001");
     expect(repairedFrontier[0]?.runId).toBe("run-0001");
   });
+
+  it("reports aligned read models after manual accept", async () => {
+    const repoRoot = join(tempRoot, "repo-manual-accept");
+    await initNumericFixtureRepo(repoRoot);
+    await seedPendingHumanReviewRun(repoRoot, {
+      runId: "run-0001",
+      candidateId: "candidate-0001",
+      decisionId: "decision-run-0001",
+      metrics: {
+        quality: makeMetricResult("quality", 0.9),
+      },
+    });
+
+    await new ManualDecisionService().accept({
+      repoRoot,
+      runId: "run-0001",
+      by: "reviewer",
+    });
+
+    const status = await getProjectStatus({ repoRoot });
+    const inspect = await inspectRun({ repoRoot, runId: "run-0001" });
+
+    expect(status.latestRun?.status).toBe("accepted");
+    expect(status.pendingHumanRuns).toHaveLength(0);
+    expect(status.frontier.map((entry) => entry.runId)).toEqual(["run-0001"]);
+    expect(inspect.run.status).toBe("accepted");
+    expect(inspect.decision?.outcome).toBe("accepted");
+    expect(inspect.frontier.map((entry) => entry.runId)).toEqual(["run-0001"]);
+  });
+
+  it("reports aligned read models after manual reject", async () => {
+    const repoRoot = join(tempRoot, "repo-manual-reject");
+    await initNumericFixtureRepo(repoRoot);
+    await seedAcceptedHistoryRun(repoRoot, {
+      runId: "run-0001",
+      candidateId: "candidate-0001",
+      decisionId: "decision-run-0001",
+      metrics: {
+        quality: makeMetricResult("quality", 0.8),
+      },
+    });
+    await seedPendingHumanReviewRun(repoRoot, {
+      runId: "run-0002",
+      candidateId: "candidate-0002",
+      decisionId: "decision-run-0002",
+      metrics: {
+        quality: makeMetricResult("quality", 0.7),
+      },
+    });
+
+    await new ManualDecisionService().reject({
+      repoRoot,
+      runId: "run-0002",
+      by: "reviewer",
+    });
+
+    const status = await getProjectStatus({ repoRoot });
+    const inspect = await inspectRun({ repoRoot, runId: "run-0002" });
+
+    expect(status.latestRun?.status).toBe("rejected");
+    expect(status.pendingHumanRuns).toHaveLength(0);
+    expect(status.frontier.map((entry) => entry.runId)).toEqual(["run-0001"]);
+    expect(inspect.run.status).toBe("rejected");
+    expect(inspect.decision?.outcome).toBe("rejected");
+    expect(inspect.frontier.map((entry) => entry.runId)).toEqual(["run-0001"]);
+  });
 });
 
 async function seedProposedRun(repoRoot: string): Promise<void> {
@@ -237,6 +304,114 @@ async function seedAcceptedFrontierRecord(repoRoot: string): Promise<void> {
   );
 }
 
+async function seedAcceptedHistoryRun(
+  repoRoot: string,
+  input: {
+    runId: string;
+    candidateId: string;
+    decisionId: string;
+    metrics: RunRecord["metrics"];
+  },
+): Promise<void> {
+  const runStore = new JsonFileRunStore(join(repoRoot, ".ralph", "runs"));
+  const decisionStore = new JsonFileDecisionStore(join(repoRoot, ".ralph", "decisions"));
+  const artifactPath = join(repoRoot, ".ralph", "runs", input.runId, "artifacts", "draft.md");
+
+  await mkdir(join(repoRoot, ".ralph", "runs", input.runId, "artifacts"), { recursive: true });
+  await writeFile(artifactPath, `${input.runId} artifact\n`, "utf8");
+
+  await runStore.put(
+    makeRunRecord({
+      runId: input.runId,
+      candidateId: input.candidateId,
+      status: "accepted",
+      phase: "completed",
+      pendingAction: "none",
+      endedAt: "2026-03-29T00:10:00.000Z",
+      decisionId: input.decisionId,
+      metrics: input.metrics,
+      artifacts: [
+        {
+          id: "draft",
+          path: artifactPath,
+        },
+      ],
+    }),
+  );
+
+  await decisionStore.put(
+    makeDecisionRecord({
+      decisionId: input.decisionId,
+      runId: input.runId,
+      metricId: "quality",
+      commitSha: `commit-${input.runId}`,
+      createdAt: "2026-03-29T00:10:00.000Z",
+      afterFrontierIds: [`frontier-${input.runId}`],
+    }),
+  );
+}
+
+async function seedPendingHumanReviewRun(
+  repoRoot: string,
+  input: {
+    runId: string;
+    candidateId: string;
+    decisionId: string;
+    metrics: RunRecord["metrics"];
+  },
+): Promise<void> {
+  const runStore = new JsonFileRunStore(join(repoRoot, ".ralph", "runs"));
+  const decisionStore = new JsonFileDecisionStore(join(repoRoot, ".ralph", "decisions"));
+  const workspaceManager = new GitWorktreeWorkspaceManager(repoRoot, join(repoRoot, ".ralph"));
+  const workspace = await workspaceManager.createWorkspace(input.candidateId, "main");
+  const artifactPath = join(repoRoot, ".ralph", "runs", input.runId, "artifacts", "draft.md");
+
+  await writeFile(join(workspace.workspacePath, "docs", "draft.md"), `${input.runId} improved draft\n`, "utf8");
+  await mkdir(join(repoRoot, ".ralph", "runs", input.runId, "artifacts"), { recursive: true });
+  await writeFile(artifactPath, `${input.runId} artifact\n`, "utf8");
+
+  await runStore.put(
+    makeRunRecord({
+      runId: input.runId,
+      candidateId: input.candidateId,
+      status: "needs_human",
+      phase: "decision_written",
+      pendingAction: "none",
+      workspacePath: workspace.workspacePath,
+      decisionId: input.decisionId,
+      proposal: {
+        proposerType: "command",
+        summary: "pending human review",
+        operators: [],
+        changedPaths: ["docs/draft.md"],
+        filesChanged: 1,
+        diffLines: 1,
+        withinBudget: true,
+      },
+      metrics: input.metrics,
+      artifacts: [
+        {
+          id: "draft",
+          path: artifactPath,
+        },
+      ],
+    }),
+  );
+
+  await decisionStore.put(
+    makeDecisionRecord({
+      decisionId: input.decisionId,
+      runId: input.runId,
+      outcome: "needs_human",
+      metricId: "quality",
+      createdAt: "2026-03-30T00:05:00.000Z",
+      frontierChanged: false,
+      beforeFrontierIds: [],
+      afterFrontierIds: [],
+    }),
+  );
+}
+
 function makeRunRecord(overrides: Partial<RunRecord> = {}): RunRecord {
   return {
     runId: "run-0001",
@@ -276,5 +451,14 @@ function makeDecisionRecord(overrides: Partial<DecisionRecord> = {}): DecisionRe
     afterFrontierIds: ["frontier-run-0001"],
     auditRequired: false,
     ...overrides,
+  };
+}
+
+function makeMetricResult(metricId: string, value: number): RunRecord["metrics"][string] {
+  return {
+    metricId,
+    value,
+    direction: "maximize",
+    details: {},
   };
 }

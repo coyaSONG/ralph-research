@@ -7,31 +7,31 @@
 
 ### Recovery
 
-- [ ] **RECV-01**: Operator can resume an interrupted run with the same `runId` instead of starting a fresh run
-- [ ] **RECV-02**: Operator can resume from the last durable execution step after interruption during proposal, experiment, evaluation, decision writing, commit, or frontier update
-- [ ] **RECV-03**: Operator can see whether a run is resumable, blocked for manual review, or requires repair via stable `status` and `inspect` output
-- [ ] **RECV-04**: Operator can recover from long-running execution without a stale lock incorrectly allowing another process to take over active work
+- [x] **RECV-01**: Operator can resume an interrupted run with the same `runId` instead of starting a fresh run
+- [x] **RECV-02**: Operator can resume from the last durable execution step after interruption during proposal, experiment, evaluation, decision writing, commit, or frontier update
+- [x] **RECV-03**: Operator can see whether a run is resumable, blocked for manual review, or requires repair via stable `status` and `inspect` output
+- [x] **RECV-04**: Operator can recover from long-running execution without a stale lock incorrectly allowing another process to take over active work
 
 ### Contract
 
-- [ ] **CONT-01**: Operator gets fail-fast validation when a manifest declares unsupported proposer, workspace, or baseline behavior
-- [ ] **CONT-02**: Operator can rely on supported manifest fields to affect runtime behavior exactly as documented
-- [ ] **CONT-03**: Operator can run validation or doctor checks that reveal capability mismatches before a destructive run starts
+- [x] **CONT-01**: Operator gets fail-fast validation when a manifest declares unsupported proposer, workspace, or baseline behavior
+- [x] **CONT-02**: Operator can rely on supported manifest fields to affect runtime behavior exactly as documented
+- [x] **CONT-03**: Operator can run validation or doctor checks that reveal capability mismatches before a destructive run starts
 
 ### Review
 
-- [ ] **REVW-01**: Operator can manually accept a `needs_human` run without collapsing or corrupting the active frontier for `single_best` or `pareto` strategies
-- [ ] **REVW-02**: Operator can manually reject a `needs_human` run and keep frontier state, run state, and cleanup behavior internally consistent
-- [ ] **REVW-03**: Operator can see consistent post-decision results across `status`, `frontier`, and `inspect` after manual review
-- [ ] **REVW-04**: Operator manual approval and automated acceptance use the same promotion and frontier semantics
+- [x] **REVW-01**: Operator can manually accept a `needs_human` run without collapsing or corrupting the active frontier for `single_best` or `pareto` strategies
+- [x] **REVW-02**: Operator can manually reject a `needs_human` run and keep frontier state, run state, and cleanup behavior internally consistent
+- [x] **REVW-03**: Operator can see consistent post-decision results across `status`, `frontier`, and `inspect` after manual review
+- [x] **REVW-04**: Operator manual approval and automated acceptance use the same promotion and frontier semantics
 
 ### Stability
 
-- [ ] **STAB-01**: Operator can trust accepted runs not to leave partially committed or partially promoted repository state without a durable repair path
-- [ ] **STAB-02**: Operator can trust frontier persistence to remain rebuildable and internally consistent after crashes or partial failures
-- [ ] **STAB-03**: Maintainer has automated regression tests covering resume behavior across interruption points
-- [ ] **STAB-04**: Maintainer has automated regression tests covering manifest/runtime contract enforcement
-- [ ] **STAB-05**: Maintainer has automated regression tests covering manual review, frontier integrity, and post-decision read models
+- [x] **STAB-01**: Operator can trust accepted runs not to leave partially committed or partially promoted repository state without a durable repair path
+- [x] **STAB-02**: Operator can trust frontier persistence to remain rebuildable and internally consistent after crashes or partial failures
+- [x] **STAB-03**: Maintainer has automated regression tests covering resume behavior across interruption points
+- [x] **STAB-04**: Maintainer has automated regression tests covering manifest/runtime contract enforcement
+- [x] **STAB-05**: Maintainer has automated regression tests covering manual review, frontier integrity, and post-decision read models
 
 ## v2 Requirements
 
@@ -63,22 +63,22 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| RECV-01 | Phase 2 | Pending |
-| RECV-02 | Phase 2 | Pending |
-| RECV-03 | Phase 2 | Pending |
-| RECV-04 | Phase 2 | Pending |
-| CONT-01 | Phase 1 | Pending |
-| CONT-02 | Phase 1 | Pending |
-| CONT-03 | Phase 1 | Pending |
-| REVW-01 | Phase 4 | Pending |
-| REVW-02 | Phase 4 | Pending |
-| REVW-03 | Phase 4 | Pending |
-| REVW-04 | Phase 4 | Pending |
-| STAB-01 | Phase 3 | Pending |
-| STAB-02 | Phase 3 | Pending |
-| STAB-03 | Phase 5 | Pending |
-| STAB-04 | Phase 5 | Pending |
-| STAB-05 | Phase 5 | Pending |
+| RECV-01 | Phase 2 | Complete |
+| RECV-02 | Phase 2 | Complete |
+| RECV-03 | Phase 2 | Complete |
+| RECV-04 | Phase 2 | Complete |
+| CONT-01 | Phase 1 | Complete |
+| CONT-02 | Phase 1 | Complete |
+| CONT-03 | Phase 1 | Complete |
+| REVW-01 | Phase 4 | Complete |
+| REVW-02 | Phase 4 | Complete |
+| REVW-03 | Phase 4 | Complete |
+| REVW-04 | Phase 4 | Complete |
+| STAB-01 | Phase 3 | Complete |
+| STAB-02 | Phase 3 | Complete |
+| STAB-03 | Phase 5 | Complete |
+| STAB-04 | Phase 5 | Complete |
+| STAB-05 | Phase 5 | Complete |
 
 **Coverage:**
 - v1 requirements: 16 total

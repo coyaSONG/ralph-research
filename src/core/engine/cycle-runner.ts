@@ -22,6 +22,7 @@ import { evaluateAnchorAgreement, applyAnchorAgreementGate, loadAnchorRecords, t
 import { sampleAuditQueue, type AuditQueueItem } from "./audit-sampler.js";
 import { evaluateChangeBudget, type ChangeBudgetDecision } from "./change-budget.js";
 import { compactRecentHistory, countConsecutiveAutoAccepts } from "./history-compactor.js";
+import { preparePromotionArtifact, requirePromotionPatch, requirePromotionPaths } from "./promotion-artifact.js";
 import { runExperiment } from "./experiment-runner.js";
 import { runLlmJudgeMetric } from "./judge-pack.js";
 import { runParallelProposers } from "./parallel-proposer.js";
@@ -31,7 +32,11 @@ import { GitClient } from "../../adapters/git/git-client.js";
 import type { JudgeProvider } from "../../adapters/judge/llm-judge-provider.js";
 import { runCommandProposer } from "../../adapters/proposer/command-proposer.js";
 import { evaluateConstraints } from "../state/constraint-engine.js";
-import { updateParetoFrontier, updateSingleBestFrontier } from "../state/frontier-engine.js";
+import {
+  attachCommitShaToFrontierEntries,
+  buildAcceptedFrontierEntry,
+  updateAcceptedFrontier,
+} from "../state/frontier-semantics.js";
 import { evaluateRatchet, type RatchetDecision } from "../state/ratchet-engine.js";
 import { advanceRunPhase } from "../state/run-state-machine.js";
 import { derivePendingAction } from "../state/recovery-classifier.js";
@@ -213,16 +218,16 @@ export async function runCycle(
 
     const decisionId = `decision-${context.runId}`;
     const decisionCreatedAt = now().toISOString();
-    const candidateFrontierEntry = buildFrontierEntry(
-      context.runId,
-      selectedCandidate.candidateId,
-      decisionCreatedAt,
-      selectedCandidate.metrics,
-      selectedCandidate.artifacts,
-    );
+    const candidateFrontierEntry = buildAcceptedFrontierEntry({
+      runId: context.runId,
+      candidateId: selectedCandidate.candidateId,
+      acceptedAt: decisionCreatedAt,
+      metrics: selectedCandidate.metrics,
+      artifacts: selectedCandidate.artifacts,
+    });
     const frontierUpdate =
       ratchetDecision.outcome === "accepted"
-        ? updateFrontier(input.manifest, frontier, candidateFrontierEntry)
+        ? updateAcceptedFrontier(input.manifest, frontier, candidateFrontierEntry)
         : null;
 
     let decisionRecord: DecisionRecord = {
@@ -283,10 +288,11 @@ export async function runCycle(
       };
       await dependencies.decisionStore.put(decisionRecord);
 
-      frontier = frontierUpdate.entries.map((entry) => ({
-        ...entry,
-        commitSha: commitResult.commitSha,
-      }));
+      frontier = attachCommitShaToFrontierEntries(
+        frontierUpdate.entries,
+        context.runId,
+        commitResult.commitSha,
+      );
 
       runRecord = advanceRunPhase(runRecord, "committed");
       await dependencies.runStore.put(runRecord);
@@ -519,15 +525,15 @@ async function runCommandCycle(
 
           const decisionId = `decision-${runRecord.runId}`;
           const decisionCreatedAt = now().toISOString();
-          const candidateFrontierEntry = buildFrontierEntry(
-            runRecord.runId,
-            runRecord.candidateId,
-            decisionCreatedAt,
-            runRecord.metrics,
-            runRecord.artifacts,
-          );
+          const candidateFrontierEntry = buildAcceptedFrontierEntry({
+            runId: runRecord.runId,
+            candidateId: runRecord.candidateId,
+            acceptedAt: decisionCreatedAt,
+            metrics: runRecord.metrics,
+            artifacts: runRecord.artifacts,
+          });
           const frontierUpdate = decisionState.ratchetDecision.outcome === "accepted"
-            ? updateFrontier(input.manifest, frontier, candidateFrontierEntry)
+            ? updateAcceptedFrontier(input.manifest, frontier, candidateFrontierEntry)
             : null;
 
           decisionRecord = {
@@ -628,16 +634,16 @@ async function runCommandCycle(
           }
 
           const candidateFrontierEntry = {
-            ...buildFrontierEntry(
-              runRecord.runId,
-              runRecord.candidateId,
-              decisionRecord.createdAt,
-              runRecord.metrics,
-              runRecord.artifacts,
-            ),
+            ...buildAcceptedFrontierEntry({
+              runId: runRecord.runId,
+              candidateId: runRecord.candidateId,
+              acceptedAt: decisionRecord.createdAt,
+              metrics: runRecord.metrics,
+              artifacts: runRecord.artifacts,
+            }),
             commitSha: decisionRecord.commitSha,
           };
-          frontier = updateFrontier(input.manifest, frontier, candidateFrontierEntry).entries;
+          frontier = updateAcceptedFrontier(input.manifest, frontier, candidateFrontierEntry).entries;
 
           await dependencies.frontierStore.save(frontier);
           runRecord = advanceRunPhase(runRecord, "frontier_updated");
@@ -1373,48 +1379,6 @@ function resolveDecision(input: {
   });
 }
 
-function buildFrontierEntry(
-  runId: string,
-  candidateId: string,
-  acceptedAt: string,
-  metrics: Record<string, MetricResult>,
-  artifacts: FrontierEntry["artifacts"],
-): FrontierEntry {
-  return {
-    frontierId: `frontier-${runId}`,
-    runId,
-    candidateId,
-    acceptedAt,
-    metrics,
-    artifacts,
-  };
-}
-
-async function preparePromotionArtifact(input: {
-  candidateId: string;
-  runDir: string;
-  manifest: RalphManifest;
-  workspaceManager: GitWorktreeWorkspaceManager;
-}): Promise<{
-  patchPath: string;
-  changedPaths: string[];
-}> {
-  const bundle = await input.workspaceManager.preparePromotionBundle(input.candidateId, {
-    excludePaths: input.manifest.experiment.outputs.map((output) => output.path),
-  });
-  if (bundle.changedPaths.length === 0) {
-    throw new Error(`accepted run ${input.candidateId} is missing durable changed-path metadata`);
-  }
-
-  return {
-    patchPath: await persistText(
-      join(input.runDir, "promotion", `${input.candidateId}.patch`),
-      bundle.patch,
-    ),
-    changedPaths: bundle.changedPaths,
-  };
-}
-
 function buildAuditQueue(
   metricId: string,
   decision: DecisionRecord,
@@ -1534,23 +1498,6 @@ async function persistJson(path: string, value: unknown): Promise<string> {
   return path;
 }
 
-function requirePromotionPatch(run: RunRecord): string {
-  if (!run.proposal.patchPath) {
-    throw new Error(`run ${run.runId} is missing a durable promotion patch`);
-  }
-
-  return run.proposal.patchPath;
-}
-
-function requirePromotionPaths(run: RunRecord): string[] {
-  const changedPaths = run.proposal.changedPaths?.filter(Boolean) ?? [];
-  if (changedPaths.length === 0) {
-    throw new Error(`run ${run.runId} is missing durable promotion paths`);
-  }
-
-  return changedPaths;
-}
-
 function getJudgePack(manifest: RalphManifest, judgePackId: string): JudgePack {
   const pack = manifest.judgePacks.find((entry) => entry.id === judgePackId);
   if (!pack) {
@@ -1565,22 +1512,4 @@ function getReferenceMetric(manifest: RalphManifest): string {
   }
 
   return manifest.frontier.objectives[0]!.metric;
-}
-
-function updateFrontier(
-  manifest: RalphManifest,
-  currentFrontier: FrontierEntry[],
-  candidateEntry: FrontierEntry,
-) {
-  if (manifest.frontier.strategy === "single_best") {
-    return updateSingleBestFrontier(currentFrontier, candidateEntry, manifest.frontier.primaryMetric);
-  }
-
-  return updateParetoFrontier(
-    currentFrontier,
-    candidateEntry,
-    manifest.frontier.objectives,
-    manifest.frontier.tieBreaker,
-    manifest.frontier.referencePoint,
-  );
 }

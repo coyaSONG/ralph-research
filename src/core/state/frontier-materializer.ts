@@ -3,7 +3,7 @@ import type { DecisionRecord } from "../model/decision-record.js";
 import type { FrontierEntry } from "../model/frontier-entry.js";
 import type { RunRecord } from "../model/run-record.js";
 import type { FrontierStore } from "../ports/frontier-store.js";
-import { updateParetoFrontier, updateSingleBestFrontier } from "./frontier-engine.js";
+import { buildAcceptedFrontierEntry, updateAcceptedFrontier } from "./frontier-semantics.js";
 
 export async function materializeFrontier(input: {
   manifest: RalphManifest;
@@ -57,13 +57,14 @@ export function rebuildFrontierFromRecords(
       manifest,
       frontier,
       {
-        frontierId: `frontier-${run.runId}`,
-        runId: run.runId,
-        candidateId: run.candidateId,
-        acceptedAt: decision.createdAt,
+        ...buildAcceptedFrontierEntry({
+          runId: run.runId,
+          candidateId: run.candidateId,
+          acceptedAt: decision.createdAt,
+          metrics: run.metrics,
+          artifacts: run.artifacts,
+        }),
         commitSha: decision.commitSha,
-        metrics: run.metrics,
-        artifacts: run.artifacts,
       },
     ).entries;
   }
@@ -102,15 +103,5 @@ function updateFrontier(
   currentFrontier: FrontierEntry[],
   candidateEntry: FrontierEntry,
 ) {
-  if (manifest.frontier.strategy === "single_best") {
-    return updateSingleBestFrontier(currentFrontier, candidateEntry, manifest.frontier.primaryMetric);
-  }
-
-  return updateParetoFrontier(
-    currentFrontier,
-    candidateEntry,
-    manifest.frontier.objectives,
-    manifest.frontier.tieBreaker,
-    manifest.frontier.referencePoint,
-  );
+  return updateAcceptedFrontier(manifest, currentFrontier, candidateEntry);
 }

@@ -172,9 +172,6 @@ function findEvidenceFailure(
       if (!input.decision?.commitSha) {
         return "commit checkpoint is missing a durable commit sha";
       }
-      if (frontierContainsRun(input.frontier, run.runId)) {
-        return "commit checkpoint already appears in frontier state";
-      }
       return null;
     case "frontier_updated":
       if (!frontierContainsRun(input.frontier, run.runId)) {

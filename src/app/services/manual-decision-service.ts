@@ -7,12 +7,19 @@ import { acquireLock, releaseLock } from "../../adapters/fs/lockfile.js";
 import { loadManifestFromFile } from "../../adapters/fs/manifest-loader.js";
 import { GitClient } from "../../adapters/git/git-client.js";
 import { DEFAULT_STORAGE_ROOT } from "../../core/manifest/defaults.js";
-import { DEFAULT_MANIFEST_FILENAME, type RalphManifest } from "../../core/manifest/schema.js";
+import { DEFAULT_MANIFEST_FILENAME } from "../../core/manifest/schema.js";
 import type { DecisionRecord } from "../../core/model/decision-record.js";
 import type { FrontierEntry } from "../../core/model/frontier-entry.js";
 import type { RunRecord } from "../../core/model/run-record.js";
+import { ensurePromotionArtifact, requirePromotionPatch, requirePromotionPaths } from "../../core/engine/promotion-artifact.js";
 import { advanceRunPhase } from "../../core/state/run-state-machine.js";
 import { GitWorktreeWorkspaceManager } from "../../core/engine/workspace-manager.js";
+import {
+  attachCommitShaToFrontierEntries,
+  buildAcceptedFrontierEntry,
+  updateAcceptedFrontier,
+} from "../../core/state/frontier-semantics.js";
+import { materializeFrontier } from "../../core/state/frontier-materializer.js";
 
 export interface ManualDecisionInput {
   repoRoot: string;
@@ -47,37 +54,90 @@ export class ManualDecisionService {
 
       const run = await requirePendingHumanRun(runStore, input.runId);
       const decision = await requireDecision(decisionStore, run);
-      const promoted = await workspaceManager.promoteWorkspace(run.candidateId, {
-        excludePaths: manifest.experiment.outputs.map((output) => output.path),
+      const runs = await runStore.list();
+      const decisions = await decisionStore.list();
+      const currentFrontier = await materializeFrontier({
+        manifest,
+        frontierStore,
+        runs,
+        decisions,
       });
-      const commitResult = await gitClient.stageAndCommitPaths(
-        [...promoted.copiedPaths, ...promoted.deletedPaths],
-        `rrx: accept ${run.runId}`,
-      );
+      const decisionCreatedAt = new Date().toISOString();
+      const runDir = join(storageRoot, "runs", run.runId);
+      const promotion = await ensurePromotionArtifact({
+        run,
+        runDir,
+        manifest,
+        workspaceManager,
+      });
+      let updatedRun: RunRecord = {
+        ...run,
+        proposal: {
+          ...run.proposal,
+          patchPath: promotion.patchPath,
+          changedPaths: promotion.changedPaths,
+          filesChanged: promotion.changedPaths.length,
+        },
+      };
+      const candidateFrontierEntry = buildAcceptedFrontierEntry({
+        runId: updatedRun.runId,
+        candidateId: updatedRun.candidateId,
+        acceptedAt: decisionCreatedAt,
+        metrics: updatedRun.metrics,
+        artifacts: updatedRun.artifacts,
+      });
+      const frontierUpdate = updateAcceptedFrontier(manifest, currentFrontier, candidateFrontierEntry);
 
-      const acceptedDecision: DecisionRecord = {
+      let acceptedDecision: DecisionRecord = {
         ...decision,
         outcome: "accepted",
         actorType: "human",
         ...(input.by ? { actorId: input.by } : {}),
         reason: appendHumanDecisionReason(decision.reason, "accepted", input),
-        frontierChanged: true,
-        afterFrontierIds: [`frontier-${run.runId}`],
-        commitSha: commitResult.commitSha,
+        createdAt: decisionCreatedAt,
+        frontierChanged: frontierUpdate.comparison.frontierChanged,
+        beforeFrontierIds: currentFrontier.map((entry) => entry.frontierId),
+        afterFrontierIds: frontierUpdate.entries.map((entry) => entry.frontierId),
       };
       await decisionStore.put(acceptedDecision);
 
-      const acceptedFrontier = [
-        buildManualFrontierEntry(run, commitResult.commitSha),
-      ];
-      await frontierStore.save(acceptedFrontier);
-
-      const updatedRun = advanceRunPhase(run, "completed", {
+      updatedRun = advanceRunPhase(updatedRun, "decision_written", {
         status: "accepted",
         decisionId: acceptedDecision.decisionId,
       });
       await runStore.put(updatedRun);
-      await workspaceManager.cleanupWorkspace(run.candidateId);
+
+      await gitClient.applyPatchIfNeeded(requirePromotionPatch(updatedRun));
+      const commitResult = await gitClient.stageAndCommitPaths(
+        requirePromotionPaths(updatedRun),
+        `rrx: accept ${updatedRun.runId}`,
+      );
+
+      acceptedDecision = {
+        ...acceptedDecision,
+        commitSha: commitResult.commitSha,
+      };
+      await decisionStore.put(acceptedDecision);
+
+      const acceptedFrontier = attachCommitShaToFrontierEntries(
+        frontierUpdate.entries,
+        updatedRun.runId,
+        commitResult.commitSha,
+      );
+
+      updatedRun = advanceRunPhase(updatedRun, "committed");
+      await runStore.put(updatedRun);
+
+      await frontierStore.save(acceptedFrontier);
+      updatedRun = advanceRunPhase(updatedRun, "frontier_updated");
+      await runStore.put(updatedRun);
+
+      await workspaceManager.cleanupWorkspace(updatedRun.candidateId);
+      updatedRun = advanceRunPhase(updatedRun, "completed", {
+        status: "accepted",
+        decisionId: acceptedDecision.decisionId,
+      });
+      await runStore.put(updatedRun);
 
       return {
         status: "accepted",
@@ -106,7 +166,15 @@ export class ManualDecisionService {
 
       const run = await requirePendingHumanRun(runStore, input.runId);
       const decision = await requireDecision(decisionStore, run);
-      const currentFrontier = await frontierStore.load();
+      const runs = await runStore.list();
+      const decisions = await decisionStore.list();
+      const currentFrontier = await materializeFrontier({
+        manifest,
+        frontierStore,
+        runs,
+        decisions,
+      });
+      const decisionCreatedAt = new Date().toISOString();
 
       const rejectedDecision: DecisionRecord = {
         ...decision,
@@ -114,17 +182,25 @@ export class ManualDecisionService {
         actorType: "human",
         ...(input.by ? { actorId: input.by } : {}),
         reason: appendHumanDecisionReason(decision.reason, "rejected", input),
+        createdAt: decisionCreatedAt,
         frontierChanged: false,
+        beforeFrontierIds: currentFrontier.map((entry) => entry.frontierId),
         afterFrontierIds: currentFrontier.map((entry) => entry.frontierId),
       };
       await decisionStore.put(rejectedDecision);
 
-      const updatedRun = advanceRunPhase(run, "completed", {
+      let updatedRun = advanceRunPhase(run, "decision_written", {
         status: "rejected",
         decisionId: rejectedDecision.decisionId,
       });
       await runStore.put(updatedRun);
-      await workspaceManager.cleanupWorkspace(run.candidateId);
+
+      await workspaceManager.cleanupWorkspace(updatedRun.candidateId);
+      updatedRun = advanceRunPhase(updatedRun, "completed", {
+        status: "rejected",
+        decisionId: rejectedDecision.decisionId,
+      });
+      await runStore.put(updatedRun);
 
       return {
         status: "rejected",
@@ -168,16 +244,4 @@ function appendHumanDecisionReason(
   const by = input.by ? ` by ${input.by}` : "";
   const note = input.note ? `; note=${input.note}` : "";
   return `${existingReason}; human ${outcome}${by}${note}`;
-}
-
-function buildManualFrontierEntry(run: RunRecord, commitSha: string): FrontierEntry {
-  return {
-    frontierId: `frontier-${run.runId}`,
-    runId: run.runId,
-    candidateId: run.candidateId,
-    acceptedAt: new Date().toISOString(),
-    commitSha,
-    metrics: run.metrics,
-    artifacts: run.artifacts,
-  };
 }

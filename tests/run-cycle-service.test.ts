@@ -382,6 +382,153 @@ describe("RunCycleService integration", () => {
     expect(headSha.trim()).toBe(resumedDecision?.commitSha);
   });
 
+  it("resumes a committed accepted run by updating frontier state on the same runId", async () => {
+    const repoRoot = await initFixtureRepo("numeric");
+    const storageRoot = join(repoRoot, ".ralph");
+    const runStore = new JsonFileRunStore(join(storageRoot, "runs"));
+    const decisionStore = new JsonFileDecisionStore(join(storageRoot, "decisions"));
+    const frontierStore = new JsonFileFrontierStore(join(storageRoot, "frontier.json"));
+    const commitSha = await gitHeadSha(repoRoot);
+
+    await decisionStore.put(makeAcceptedDecisionRecord({ commitSha }));
+    await runStore.put(makeCommittedAcceptedRunRecord());
+
+    const service = new RunCycleService();
+    const result = await service.run({ repoRoot });
+
+    expect(result.status).toBe("accepted");
+    expect(result.runResult?.run.runId).toBe("run-0001");
+    expect(result.runResult?.run.phase).toBe("completed");
+
+    const resumedRun = await runStore.get("run-0001");
+    const frontier = await frontierStore.load();
+
+    expect(resumedRun?.phase).toBe("completed");
+    expect(frontier).toHaveLength(1);
+    expect(frontier[0]?.runId).toBe("run-0001");
+    expect(frontier[0]?.commitSha).toBe(commitSha);
+  });
+
+  it("resumes a frontier-updated accepted run by cleaning up the workspace on the same runId", async () => {
+    const repoRoot = await initFixtureRepo("numeric");
+    const storageRoot = join(repoRoot, ".ralph");
+    const runStore = new JsonFileRunStore(join(storageRoot, "runs"));
+    const decisionStore = new JsonFileDecisionStore(join(storageRoot, "decisions"));
+    const frontierStore = new JsonFileFrontierStore(join(storageRoot, "frontier.json"));
+    const workspaceManager = new GitWorktreeWorkspaceManager(repoRoot, storageRoot);
+    const workspace = await workspaceManager.createWorkspace("candidate-0001", "main");
+    const commitSha = await gitHeadSha(repoRoot);
+
+    await decisionStore.put(makeAcceptedDecisionRecord({ commitSha }));
+    await runStore.put(makeFrontierUpdatedAcceptedRunRecord(workspace.workspacePath));
+    await frontierStore.save([
+      {
+        frontierId: "frontier-run-0001",
+        runId: "run-0001",
+        candidateId: "candidate-0001",
+        acceptedAt: "2026-03-29T00:00:00.000Z",
+        commitSha,
+        metrics: {
+          quality: {
+            metricId: "quality",
+            value: 0.7,
+            direction: "maximize",
+            details: {},
+          },
+        },
+        artifacts: [
+          {
+            id: "draft",
+            path: "out/draft.md",
+          },
+        ],
+      },
+    ]);
+
+    const service = new RunCycleService();
+    const result = await service.run({ repoRoot });
+
+    expect(result.status).toBe("accepted");
+    expect(result.runResult?.run.runId).toBe("run-0001");
+    expect(result.runResult?.run.phase).toBe("completed");
+
+    const resumedRun = await runStore.get("run-0001");
+
+    expect(resumedRun?.phase).toBe("completed");
+    await expect(pathExists(workspace.workspacePath)).resolves.toBe(false);
+  });
+
+  it("retains pareto incumbents and their commit shas when a new accepted run joins the frontier", async () => {
+    const repoRoot = await initFixtureRepo("pareto");
+    const storageRoot = join(repoRoot, ".ralph");
+    const runStore = new JsonFileRunStore(join(storageRoot, "runs"));
+    const decisionStore = new JsonFileDecisionStore(join(storageRoot, "decisions"));
+
+    await seedAcceptedHistory(repoRoot, {
+      runId: "run-0001",
+      candidateId: "candidate-0001",
+      decisionId: "decision-run-0001",
+      commitSha: "commit-run-0001",
+      createdAt: "2026-03-29T00:10:00.000Z",
+      metrics: {
+        quality: {
+          metricId: "quality",
+          value: 0.9,
+          direction: "maximize",
+          details: {},
+        },
+        novelty: {
+          metricId: "novelty",
+          value: 0.4,
+          direction: "maximize",
+          details: {},
+        },
+      },
+    });
+    await seedAcceptedHistory(repoRoot, {
+      runId: "run-0002",
+      candidateId: "candidate-0002",
+      decisionId: "decision-run-0002",
+      commitSha: "commit-run-0002",
+      createdAt: "2026-03-29T00:20:00.000Z",
+      metrics: {
+        quality: {
+          metricId: "quality",
+          value: 0.4,
+          direction: "maximize",
+          details: {},
+        },
+        novelty: {
+          metricId: "novelty",
+          value: 0.9,
+          direction: "maximize",
+          details: {},
+        },
+      },
+    });
+
+    const service = new RunCycleService();
+    const result = await service.run({ repoRoot });
+
+    expect(result.status).toBe("accepted");
+    const frontierStore = new JsonFileFrontierStore(join(storageRoot, "frontier.json"));
+    const frontier = await frontierStore.load();
+    const latestRunId = result.runResult?.run.runId;
+
+    expect(latestRunId).toBe("run-0003");
+    expect(frontier.map((entry) => ({ runId: entry.runId, commitSha: entry.commitSha }))).toEqual([
+      { runId: "run-0001", commitSha: "commit-run-0001" },
+      { runId: "run-0002", commitSha: "commit-run-0002" },
+      { runId: "run-0003", commitSha: result.runResult?.decision?.commitSha },
+    ]);
+
+    const storedRun = await runStore.get("run-0003");
+    const storedDecision = await decisionStore.get("decision-run-0003");
+
+    expect(storedRun?.status).toBe("accepted");
+    expect(storedDecision?.commitSha).toBe(result.runResult?.decision?.commitSha);
+  });
+
   it("rebuilds the frontier from durable accepted records when the snapshot is missing", async () => {
     const repoRoot = await initFixtureRepo("numeric");
     const storageRoot = join(repoRoot, ".ralph");
@@ -416,7 +563,7 @@ describe("RunCycleService integration", () => {
 });
 
 async function initFixtureRepo(
-  mode: "numeric" | "judge" | "graduation" | "history" | "parallel" | "baseline",
+  mode: "numeric" | "judge" | "graduation" | "history" | "parallel" | "baseline" | "pareto",
   options: {
     baselineRef?: string;
     workspace?: "git" | "copy";
@@ -462,6 +609,11 @@ async function initFixtureRepo(
     await writeFile(join(repoRoot, "scripts", "propose-c.mjs"), buildParallelProposerScript("Candidate C"), "utf8");
     await writeFile(join(repoRoot, "scripts", "metric.mjs"), buildParallelMetricScript(), "utf8");
     await writeFile(join(repoRoot, "ralph.yaml"), buildParallelManifest(options), "utf8");
+  } else if (mode === "pareto") {
+    await writeFile(join(repoRoot, "scripts", "propose.mjs"), buildDefaultProposerScript(), "utf8");
+    await writeFile(join(repoRoot, "scripts", "metric-quality.mjs"), 'console.log("0.8");\n', "utf8");
+    await writeFile(join(repoRoot, "scripts", "metric-novelty.mjs"), 'console.log("0.8");\n', "utf8");
+    await writeFile(join(repoRoot, "ralph.yaml"), buildParetoManifest(options), "utf8");
   } else if (mode === "baseline") {
     await execa("git", ["checkout", "-b", "main"], { cwd: repoRoot });
     await writeFile(join(repoRoot, "scripts", "propose.mjs"), buildBaselineAwareProposerScript(), "utf8");
@@ -497,6 +649,51 @@ async function createPromotionPatch(workspacePath: string, patchPath: string): P
     excludePaths: ["out/draft.md"],
   });
   await writeFile(patchPath, bundle.patch, "utf8");
+}
+
+async function seedAcceptedHistory(
+  repoRoot: string,
+  input: {
+    runId: string;
+    candidateId: string;
+    decisionId: string;
+    commitSha: string;
+    createdAt: string;
+    metrics: ReturnType<typeof makeAcceptedRunRecord>["metrics"];
+  },
+): Promise<void> {
+  const storageRoot = join(repoRoot, ".ralph");
+  const runStore = new JsonFileRunStore(join(storageRoot, "runs"));
+  const decisionStore = new JsonFileDecisionStore(join(storageRoot, "decisions"));
+  const artifactPath = join(storageRoot, "runs", input.runId, "artifacts", "draft.md");
+
+  await mkdir(join(storageRoot, "runs", input.runId, "artifacts"), { recursive: true });
+  await writeFile(artifactPath, `${input.runId} artifact\n`, "utf8");
+
+  await runStore.put({
+    ...makeCompletedAcceptedRunRecord(),
+    cycle: Number.parseInt(input.runId.replace("run-", ""), 10),
+    runId: input.runId,
+    candidateId: input.candidateId,
+    decisionId: input.decisionId,
+    metrics: input.metrics,
+    artifacts: [
+      {
+        id: "draft",
+        path: artifactPath,
+      },
+    ],
+  });
+  await decisionStore.put({
+    ...makeAcceptedDecisionRecord(),
+    decisionId: input.decisionId,
+    runId: input.runId,
+    policyType: "pareto_dominance",
+    metricId: "quality",
+    createdAt: input.createdAt,
+    afterFrontierIds: [`frontier-${input.runId}`],
+    commitSha: input.commitSha,
+  });
 }
 
 function makeAcceptedDecisionRecord(overrides: Partial<ReturnType<typeof baseAcceptedDecisionRecord>> = {}) {
@@ -572,6 +769,30 @@ function makeCompletedAcceptedRunRecord(
     phase: "completed" as const,
     pendingAction: "none" as const,
     endedAt: "2026-03-29T00:10:00.000Z",
+    ...overrides,
+  };
+}
+
+function makeCommittedAcceptedRunRecord(
+  overrides: Partial<ReturnType<typeof makeAcceptedRunRecord>> = {},
+) {
+  return {
+    ...makeAcceptedRunRecord("/tmp/already-persisted.patch"),
+    phase: "committed" as const,
+    pendingAction: "update_frontier" as const,
+    ...overrides,
+  };
+}
+
+function makeFrontierUpdatedAcceptedRunRecord(
+  workspacePath: string,
+  overrides: Partial<ReturnType<typeof makeAcceptedRunRecord>> = {},
+) {
+  return {
+    ...makeAcceptedRunRecord("/tmp/already-persisted.patch"),
+    phase: "frontier_updated" as const,
+    pendingAction: "cleanup_workspace" as const,
+    workspacePath,
     ...overrides,
   };
 }
@@ -940,6 +1161,61 @@ function buildParallelManifest(options: { baselineRef?: string; workspace?: "git
     "  type: epsilon_improve",
     "  metric: quality",
     "  epsilon: 0",
+    "storage:",
+    "  root: .ralph",
+    "",
+  ].join("\n");
+}
+
+function buildParetoManifest(options: { baselineRef?: string; workspace?: "git" | "copy" } = {}): string {
+  return [
+    'schemaVersion: "0.1"',
+    "project:",
+    "  name: service-pareto",
+    "  artifact: manuscript",
+    `  baselineRef: ${options.baselineRef ?? "main"}`,
+    `  workspace: ${options.workspace ?? "git"}`,
+    "scope:",
+    "  allowedGlobs:",
+    '    - "**/*.md"',
+    "  maxFilesChanged: 2",
+    "  maxLineDelta: 20",
+    "proposer:",
+    "  type: command",
+    '  command: "node scripts/propose.mjs"',
+    "experiment:",
+    "  run:",
+    '    command: "node scripts/experiment.mjs"',
+    "  outputs:",
+    "    - id: draft",
+    "      path: out/draft.md",
+    "metrics:",
+    "  catalog:",
+    "    - id: quality",
+    "      kind: numeric",
+    "      direction: maximize",
+    "      extractor:",
+    "        type: command",
+    '        command: "node scripts/metric-quality.mjs"',
+    "        parser: plain_number",
+    "    - id: novelty",
+    "      kind: numeric",
+    "      direction: maximize",
+    "      extractor:",
+    "        type: command",
+    '        command: "node scripts/metric-novelty.mjs"',
+    "        parser: plain_number",
+    "constraints: []",
+    "frontier:",
+    "  strategy: pareto",
+    "  objectives:",
+    "    - metric: quality",
+    "      epsilon: 0",
+    "    - metric: novelty",
+    "      epsilon: 0",
+    "  tieBreaker: none",
+    "ratchet:",
+    "  type: pareto_dominance",
     "storage:",
     "  root: .ralph",
     "",

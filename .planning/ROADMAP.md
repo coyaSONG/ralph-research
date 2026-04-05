@@ -15,8 +15,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Contract Truth & Run Admission** - Unsupported manifest/runtime combinations are rejected before a destructive run can start. (completed 2026-04-05)
 - [x] **Phase 2: Resume Control Plane** - Interrupted runs can resume safely on the same `runId` with truthful recovery state. (completed 2026-04-05)
 - [x] **Phase 3: Promotion Durability & Frontier Persistence** - Accepted runs promote changes through a repairable path and keep frontier state rebuildable. (completed 2026-04-05)
-- [ ] **Phase 4: Manual Review Semantic Unification** - Human accept/reject decisions preserve the same frontier and read-model semantics as automation.
-- [ ] **Phase 5: Regression Hardening Matrix** - Recovery, contract, promotion, and review guarantees stay protected by automated tests.
+- [x] **Phase 4: Manual Review Semantic Unification** - Human accept/reject decisions preserve the same frontier and read-model semantics as automation. (completed 2026-04-05)
+- [x] **Phase 5: Regression Hardening Matrix** - Recovery, contract, promotion, and review guarantees stay protected by automated tests. (completed 2026-04-05)
 
 ## Phase Details
 
@@ -72,7 +72,10 @@ Plans:
   2. Operator can manually reject a `needs_human` run and keep run state, frontier state, and cleanup behavior internally consistent.
   3. Operator can compare `status`, `frontier`, and `inspect` after manual review and see the same post-decision truth in each surface.
   4. Operator can trust manual approval and automated acceptance to produce the same promotion and frontier semantics.
-**Plans**: TBD
+**Plans**: 2 plans
+Plans:
+- [x] 04-01-PLAN.md - Unify manual accept/reject with durable promotion and shared frontier semantics
+- [x] 04-02-PLAN.md - Verify post-review `status`, `frontier`, and `inspect` consistency
 
 ### Phase 5: Regression Hardening Matrix
 **Goal**: Core runtime hardening remains trustworthy because the highest-risk recovery, contract, and review paths are covered by automated regression tests.
@@ -82,7 +85,11 @@ Plans:
   1. Maintainer can run automated tests that simulate interruption points and verify same-`runId` resume behavior across recovery boundaries.
   2. Maintainer can run automated tests that fail when manifest/runtime contract enforcement drifts from documented support.
   3. Maintainer can run automated tests that catch manual review, frontier integrity, and post-decision read-model regressions before release.
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [x] 05-01-PLAN.md - Expand same-`runId` resume regression coverage across later accepted-path checkpoints
+- [x] 05-02-PLAN.md - Add admission parity tests across validate, doctor, and run
+- [x] 05-03-PLAN.md - Protect frontier integrity and manual-review read models with regression matrix tests
 
 ## Progress
 
@@ -94,5 +101,5 @@ Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
 | 1. Contract Truth & Run Admission | 3/3 | Complete    | 2026-04-05 |
 | 2. Resume Control Plane | 4/4 | Complete | 2026-04-05 |
 | 3. Promotion Durability & Frontier Persistence | 2/2 | Complete | 2026-04-05 |
-| 4. Manual Review Semantic Unification | 0/TBD | Not started | - |
-| 5. Regression Hardening Matrix | 0/TBD | Not started | - |
+| 4. Manual Review Semantic Unification | 2/2 | Complete | 2026-04-05 |
+| 5. Regression Hardening Matrix | 3/3 | Complete | 2026-04-05 |
