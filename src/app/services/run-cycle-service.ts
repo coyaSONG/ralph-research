@@ -45,10 +45,11 @@ export class RunCycleService {
     const repoRoot = resolve(input.repoRoot);
     const manifestPath = resolve(repoRoot, input.manifestPath ?? DEFAULT_MANIFEST_FILENAME);
     const lockPath = join(repoRoot, DEFAULT_STORAGE_ROOT, "lock");
+    // Run the shared repo-aware admission check before taking locks or mutating storage.
+    const loadedManifest = await loadManifestFromFile(manifestPath, { repoRoot });
     const lock = await acquireLock(lockPath);
 
     try {
-      const loadedManifest = await loadManifestFromFile(manifestPath);
       const storageRoot = join(repoRoot, loadedManifest.manifest.storage.root);
       const runStore = new JsonFileRunStore(join(storageRoot, "runs"));
       const frontierStore = new JsonFileFrontierStore(join(storageRoot, "frontier.json"));
@@ -72,6 +73,7 @@ export class RunCycleService {
           repoRoot,
           manifestPath: loadedManifest.path,
           manifest: loadedManifest.manifest,
+          resolvedBaselineRef: loadedManifest.resolvedBaselineRef,
           currentFrontier: frontier,
         },
         {

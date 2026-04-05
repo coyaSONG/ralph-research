@@ -38,7 +38,7 @@ export class GitWorktreeWorkspaceManager {
     this.workspaceRoot = join(this.ralphRoot, "workspaces");
   }
 
-  public async createWorkspace(candidateId: string): Promise<WorkspaceInfo> {
+  public async createWorkspace(candidateId: string, baselineRef = "HEAD"): Promise<WorkspaceInfo> {
     await this.ensureGitRepo();
 
     const workspacePath = this.getWorkspacePath(candidateId);
@@ -48,7 +48,7 @@ export class GitWorktreeWorkspaceManager {
     }
 
     await mkdir(this.workspaceRoot, { recursive: true });
-    await execa("git", ["-C", this.repoRoot, "worktree", "add", "--detach", workspacePath, "HEAD"]);
+    await execa("git", ["-C", this.repoRoot, "worktree", "add", "--detach", workspacePath, baselineRef]);
     return this.buildWorkspaceInfo(candidateId, workspacePath);
   }
 

@@ -113,6 +113,24 @@ describe("GitWorktreeWorkspaceManager", () => {
 
     await manager.cleanupWorkspace("candidate-001");
   });
+
+  it("creates workspaces from an explicit non-HEAD baseline ref", async () => {
+    const repoRoot = await initTempGitRepo();
+    await writeFile(join(repoRoot, "draft.md"), "baseline version\n", "utf8");
+    await execa("git", ["add", "draft.md"], { cwd: repoRoot });
+    await execa("git", ["commit", "-m", "baseline"], { cwd: repoRoot });
+    await execa("git", ["tag", "baseline-start"], { cwd: repoRoot });
+    await writeFile(join(repoRoot, "draft.md"), "head version\n", "utf8");
+    await execa("git", ["add", "draft.md"], { cwd: repoRoot });
+    await execa("git", ["commit", "-m", "head"], { cwd: repoRoot });
+
+    const manager = new GitWorktreeWorkspaceManager(repoRoot);
+    const workspace = await manager.createWorkspace("candidate-002", "baseline-start");
+
+    expect(await readFile(join(workspace.workspacePath, "draft.md"), "utf8")).toBe("baseline version\n");
+
+    await manager.cleanupWorkspace("candidate-002");
+  });
 });
 
 async function initTempGitRepo(): Promise<string> {

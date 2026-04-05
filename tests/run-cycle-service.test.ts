@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,6 +10,7 @@ import { JsonFileFrontierStore } from "../src/adapters/fs/json-file-frontier-sto
 import { JsonFileRunStore } from "../src/adapters/fs/json-file-run-store.js";
 import type { JudgeProvider, JudgeRequest, JudgeResponse } from "../src/adapters/judge/llm-judge-provider.js";
 import { RunCycleService } from "../src/app/services/run-cycle-service.js";
+import { ManifestLoadError } from "../src/adapters/fs/manifest-loader.js";
 
 let tempRoot = "";
 
@@ -238,9 +239,91 @@ describe("RunCycleService integration", () => {
     const frontier = await frontierStore.load();
     expect(frontier[0]?.metrics.quality.value).toBeCloseTo(0.9);
   });
+
+  it("fails unsupported workspace manifests before creating lock, runs, or workspaces", async () => {
+    const repoRoot = await initFixtureRepo("numeric", { workspace: "copy" });
+    const service = new RunCycleService();
+
+    await expect(service.run({ repoRoot })).rejects.toMatchObject({
+      name: "ManifestLoadError",
+      causeValue: {
+        issues: [
+          expect.objectContaining({
+            path: ["project", "workspace"],
+          }),
+        ],
+      },
+    } satisfies Partial<ManifestLoadError>);
+
+    await expect(pathExists(join(repoRoot, ".ralph", "lock"))).resolves.toBe(false);
+    await expect(pathExists(join(repoRoot, ".ralph", "runs"))).resolves.toBe(false);
+    await expect(pathExists(join(repoRoot, ".ralph", "workspaces"))).resolves.toBe(false);
+    expect(await gitCommitCount(repoRoot)).toBe(1);
+  });
+
+  it("fails unsupported operator_llm manifests before creating lock, runs, or workspaces", async () => {
+    const repoRoot = await initFixtureRepo("numeric", { proposerType: "operator_llm" });
+    const service = new RunCycleService();
+
+    await expect(service.run({ repoRoot })).rejects.toMatchObject({
+      name: "ManifestLoadError",
+      causeValue: {
+        issues: [
+          expect.objectContaining({
+            path: ["proposer", "type"],
+          }),
+        ],
+      },
+    } satisfies Partial<ManifestLoadError>);
+
+    await expect(pathExists(join(repoRoot, ".ralph", "lock"))).resolves.toBe(false);
+    await expect(pathExists(join(repoRoot, ".ralph", "runs"))).resolves.toBe(false);
+    await expect(pathExists(join(repoRoot, ".ralph", "workspaces"))).resolves.toBe(false);
+    expect(await gitCommitCount(repoRoot)).toBe(1);
+  });
+
+  it("fails unresolved baseline refs before creating lock, runs, or workspaces", async () => {
+    const repoRoot = await initFixtureRepo("numeric", { baselineRef: "does-not-exist" });
+    const service = new RunCycleService();
+
+    await expect(service.run({ repoRoot })).rejects.toMatchObject({
+      name: "ManifestLoadError",
+      causeValue: {
+        issues: [
+          expect.objectContaining({
+            path: ["project", "baselineRef"],
+          }),
+        ],
+      },
+    } satisfies Partial<ManifestLoadError>);
+
+    await expect(pathExists(join(repoRoot, ".ralph", "lock"))).resolves.toBe(false);
+    await expect(pathExists(join(repoRoot, ".ralph", "runs"))).resolves.toBe(false);
+    await expect(pathExists(join(repoRoot, ".ralph", "workspaces"))).resolves.toBe(false);
+    expect(await gitCommitCount(repoRoot)).toBe(1);
+  });
+
+  it("starts workspaces from the requested non-HEAD baseline ref", async () => {
+    const repoRoot = await initFixtureRepo("baseline");
+    const service = new RunCycleService();
+
+    const result = await service.run({ repoRoot });
+
+    expect(result.status).toBe("accepted");
+    expect(result.runResult?.run.workspaceRef).toMatch(/[0-9a-f]{40}/);
+    expect(await readFile(join(repoRoot, "docs", "draft.md"), "utf8")).toContain("baseline version");
+    expect(await readFile(join(repoRoot, "docs", "draft.md"), "utf8")).not.toContain("head version");
+  });
 });
 
-async function initFixtureRepo(mode: "numeric" | "judge" | "graduation" | "history" | "parallel"): Promise<string> {
+async function initFixtureRepo(
+  mode: "numeric" | "judge" | "graduation" | "history" | "parallel" | "baseline",
+  options: {
+    baselineRef?: string;
+    workspace?: "git" | "copy";
+    proposerType?: "command" | "operator_llm";
+  } = {},
+): Promise<string> {
   const repoRoot = join(tempRoot, `repo-${mode}`);
   await mkdir(join(repoRoot, "docs"), { recursive: true });
   await mkdir(join(repoRoot, "scripts"), { recursive: true });
@@ -267,27 +350,38 @@ async function initFixtureRepo(mode: "numeric" | "judge" | "graduation" | "histo
   if (mode === "numeric") {
     await writeFile(join(repoRoot, "scripts", "propose.mjs"), buildDefaultProposerScript(), "utf8");
     await writeFile(join(repoRoot, "scripts", "metric.mjs"), 'console.log("0.7");\n', "utf8");
-    await writeFile(join(repoRoot, "ralph.yaml"), buildNumericManifest(), "utf8");
+    await writeFile(join(repoRoot, "ralph.yaml"), buildNumericManifest(options), "utf8");
   } else if (mode === "judge") {
     await writeFile(join(repoRoot, "scripts", "propose.mjs"), buildDefaultProposerScript(), "utf8");
-    await writeFile(join(repoRoot, "ralph.yaml"), buildJudgeManifest(), "utf8");
+    await writeFile(join(repoRoot, "ralph.yaml"), buildJudgeManifest(options), "utf8");
   } else if (mode === "graduation") {
     await writeFile(join(repoRoot, "scripts", "propose.mjs"), buildGraduationProposerScript(), "utf8");
-    await writeFile(join(repoRoot, "ralph.yaml"), buildGraduationManifest(), "utf8");
+    await writeFile(join(repoRoot, "ralph.yaml"), buildGraduationManifest(options), "utf8");
   } else if (mode === "parallel") {
     await writeFile(join(repoRoot, "scripts", "propose-a.mjs"), buildParallelProposerScript("Candidate A"), "utf8");
     await writeFile(join(repoRoot, "scripts", "propose-b.mjs"), buildParallelProposerScript("Candidate B"), "utf8");
     await writeFile(join(repoRoot, "scripts", "propose-c.mjs"), buildParallelProposerScript("Candidate C"), "utf8");
     await writeFile(join(repoRoot, "scripts", "metric.mjs"), buildParallelMetricScript(), "utf8");
-    await writeFile(join(repoRoot, "ralph.yaml"), buildParallelManifest(), "utf8");
+    await writeFile(join(repoRoot, "ralph.yaml"), buildParallelManifest(options), "utf8");
+  } else if (mode === "baseline") {
+    await execa("git", ["checkout", "-b", "main"], { cwd: repoRoot });
+    await writeFile(join(repoRoot, "scripts", "propose.mjs"), buildBaselineAwareProposerScript(), "utf8");
+    await writeFile(join(repoRoot, "scripts", "metric.mjs"), 'console.log("0.7");\n', "utf8");
+    await writeFile(join(repoRoot, "ralph.yaml"), buildNumericManifest({ ...options, baselineRef: "baseline-start" }), "utf8");
+    await writeFile(join(repoRoot, "docs", "draft.md"), "baseline version\n", "utf8");
+    await execa("git", ["add", "."], { cwd: repoRoot });
+    await execa("git", ["commit", "-m", "baseline fixture"], { cwd: repoRoot });
+    await execa("git", ["tag", "baseline-start"], { cwd: repoRoot });
+    await writeFile(join(repoRoot, "docs", "draft.md"), "head version\n", "utf8");
   } else {
     await writeFile(join(repoRoot, "scripts", "propose.mjs"), buildHistoryAwareProposerScript(), "utf8");
     await writeFile(join(repoRoot, "scripts", "metric.mjs"), buildHistoryMetricScript(), "utf8");
-    await writeFile(join(repoRoot, "ralph.yaml"), buildHistoryManifest(), "utf8");
+    await writeFile(join(repoRoot, "ralph.yaml"), buildHistoryManifest(options), "utf8");
   }
 
   await execa("git", ["add", "."], { cwd: repoRoot });
   await execa("git", ["commit", "-m", "fixture"], { cwd: repoRoot });
+  await execa("git", ["branch", "-M", "main"], { cwd: repoRoot });
 
   return repoRoot;
 }
@@ -301,22 +395,35 @@ function buildDefaultProposerScript(): string {
   ].join("\n");
 }
 
-function buildNumericManifest(): string {
+function buildNumericManifest(options: { baselineRef?: string; workspace?: "git" | "copy"; proposerType?: "command" | "operator_llm" } = {}): string {
+  const proposerLines =
+    options.proposerType === "operator_llm"
+      ? [
+          "proposer:",
+          "  type: operator_llm",
+          "  model: fake-model",
+          "  prompt: prompts/judge.md",
+          "  operators:",
+          "    - strengthen_claim_evidence",
+        ]
+      : [
+          "proposer:",
+          "  type: command",
+          '  command: "node scripts/propose.mjs"',
+        ];
   return [
     'schemaVersion: "0.1"',
     "project:",
     "  name: service-numeric",
     "  artifact: manuscript",
-    "  baselineRef: main",
-    "  workspace: git",
+    `  baselineRef: ${options.baselineRef ?? "main"}`,
+    `  workspace: ${options.workspace ?? "git"}`,
     "scope:",
     "  allowedGlobs:",
     '    - "**/*.md"',
     "  maxFilesChanged: 2",
     "  maxLineDelta: 20",
-    "proposer:",
-    "  type: command",
-    '  command: "node scripts/propose.mjs"',
+    ...proposerLines,
     "experiment:",
     "  run:",
     '    command: "node scripts/experiment.mjs"',
@@ -346,14 +453,14 @@ function buildNumericManifest(): string {
   ].join("\n");
 }
 
-function buildJudgeManifest(): string {
+function buildJudgeManifest(options: { baselineRef?: string; workspace?: "git" | "copy" } = {}): string {
   return [
     'schemaVersion: "0.1"',
     "project:",
     "  name: service-judge",
     "  artifact: manuscript",
-    "  baselineRef: main",
-    "  workspace: git",
+    `  baselineRef: ${options.baselineRef ?? "main"}`,
+    `  workspace: ${options.workspace ?? "git"}`,
     "scope:",
     "  allowedGlobs:",
     '    - "**/*.md"',
@@ -409,14 +516,14 @@ function buildJudgeManifest(): string {
   ].join("\n");
 }
 
-function buildGraduationManifest(): string {
+function buildGraduationManifest(options: { baselineRef?: string; workspace?: "git" | "copy" } = {}): string {
   return [
     'schemaVersion: "0.1"',
     "project:",
     "  name: service-graduation",
     "  artifact: manuscript",
-    "  baselineRef: main",
-    "  workspace: git",
+    `  baselineRef: ${options.baselineRef ?? "main"}`,
+    `  workspace: ${options.workspace ?? "git"}`,
     "scope:",
     "  allowedGlobs:",
     '    - "**/*.md"',
@@ -490,14 +597,14 @@ function buildGraduationProposerScript(): string {
   ].join("\n");
 }
 
-function buildHistoryManifest(): string {
+function buildHistoryManifest(options: { baselineRef?: string; workspace?: "git" | "copy" } = {}): string {
   return [
     'schemaVersion: "0.1"',
     "project:",
     "  name: service-history",
     "  artifact: manuscript",
-    "  baselineRef: main",
-    "  workspace: git",
+    `  baselineRef: ${options.baselineRef ?? "main"}`,
+    `  workspace: ${options.workspace ?? "git"}`,
     "scope:",
     "  allowedGlobs:",
     '    - "**/*.md"',
@@ -552,6 +659,17 @@ function buildHistoryAwareProposerScript(): string {
   ].join("\n");
 }
 
+function buildBaselineAwareProposerScript(): string {
+  return [
+    'import { readFileSync, writeFileSync } from "node:fs";',
+    'import { join } from "node:path";',
+    'const draftPath = join(process.cwd(), "docs", "draft.md");',
+    'const current = readFileSync(draftPath, "utf8").trim();',
+    'writeFileSync(draftPath, `from ${current}\\nImproved draft with stronger structure.\\n`, "utf8");',
+    'console.log("proposal complete");',
+  ].join("\n");
+}
+
 function buildHistoryMetricScript(): string {
   return [
     'import { readFileSync } from "node:fs";',
@@ -581,14 +699,14 @@ function buildParallelMetricScript(): string {
   ].join("\n");
 }
 
-function buildParallelManifest(): string {
+function buildParallelManifest(options: { baselineRef?: string; workspace?: "git" | "copy" } = {}): string {
   return [
     'schemaVersion: "0.1"',
     "project:",
     "  name: service-parallel",
     "  artifact: manuscript",
-    "  baselineRef: main",
-    "  workspace: git",
+    `  baselineRef: ${options.baselineRef ?? "main"}`,
+    `  workspace: ${options.workspace ?? "git"}`,
     "scope:",
     "  allowedGlobs:",
     '    - "**/*.md"',
@@ -665,4 +783,18 @@ function absolute(score: number, confidence?: number): JudgeResponse {
     raw: JSON.stringify({ score, confidence }),
     ...(confidence === undefined ? {} : { confidence }),
   };
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function gitCommitCount(repoRoot: string): Promise<number> {
+  const { stdout } = await execa("git", ["rev-list", "--count", "HEAD"], { cwd: repoRoot });
+  return Number.parseInt(stdout.trim(), 10);
 }

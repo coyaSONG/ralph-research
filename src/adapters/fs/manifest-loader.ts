@@ -10,6 +10,7 @@ import { DEFAULT_MANIFEST_FILENAME, RalphManifestSchema, type RalphManifest } fr
 export interface LoadedManifest {
   path: string;
   manifest: RalphManifest;
+  resolvedBaselineRef: string;
 }
 
 export class ManifestLoadError extends Error {
@@ -60,6 +61,7 @@ export async function loadManifestFromFile(
     return {
       path: resolvedPath,
       manifest,
+      resolvedBaselineRef: admission.resolvedBaselineRef,
     };
   } catch (error) {
     if (error instanceof ManifestLoadError) {

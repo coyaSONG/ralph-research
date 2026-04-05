@@ -49,6 +49,7 @@ export interface RunCycleInput {
   repoRoot: string;
   manifestPath: string;
   manifest: RalphManifest;
+  resolvedBaselineRef: string;
   currentFrontier: FrontierEntry[];
 }
 
@@ -107,7 +108,7 @@ export async function runCycle(
     metricId: "metric" in input.manifest.ratchet ? input.manifest.ratchet.metric ?? referenceMetric : referenceMetric,
   });
 
-  let runRecord = createInitialRunRecord(input.manifest, undefined, context);
+  let runRecord = createInitialRunRecord(input.manifest, input.resolvedBaselineRef, undefined, context);
   await dependencies.runStore.put(runRecord);
 
   let frontier = input.currentFrontier;
@@ -124,6 +125,7 @@ export async function runCycle(
       repoRoot: input.repoRoot,
       manifestDir,
       manifest: input.manifest,
+      resolvedBaselineRef: input.resolvedBaselineRef,
       runDir: context.runDir,
       workspaceManager: dependencies.workspaceManager,
       currentFrontier: frontier,
@@ -328,7 +330,12 @@ async function createRunContext(
   };
 }
 
-function createInitialRunRecord(manifest: RalphManifest, workspacePath: string | undefined, context: RunContext): RunRecord {
+function createInitialRunRecord(
+  manifest: RalphManifest,
+  resolvedBaselineRef: string,
+  workspacePath: string | undefined,
+  context: RunContext,
+): RunRecord {
   return {
     runId: context.runId,
     cycle: context.cycle,
@@ -338,7 +345,7 @@ function createInitialRunRecord(manifest: RalphManifest, workspacePath: string |
     pendingAction: "execute_experiment",
     startedAt: context.startedAt,
     manifestHash: context.manifestHash,
-    workspaceRef: manifest.project.baselineRef,
+    workspaceRef: resolvedBaselineRef,
     ...(workspacePath ? { workspacePath } : {}),
     proposal: {
       proposerType: manifest.proposer.type,
@@ -361,6 +368,7 @@ async function prepareCandidateAttempt(input: {
   repoRoot: string;
   manifestDir: string;
   manifest: RalphManifest;
+  resolvedBaselineRef: string;
   runDir: string;
   workspaceManager: GitWorktreeWorkspaceManager;
   currentFrontier: FrontierEntry[];
@@ -380,6 +388,7 @@ async function prepareCandidateAttempt(input: {
           repoRoot: input.repoRoot,
           manifestDir: input.manifestDir,
           manifest: input.manifest,
+          resolvedBaselineRef: input.resolvedBaselineRef,
           proposer: strategy,
           candidateId,
           runDir: input.runDir,
@@ -440,6 +449,7 @@ async function prepareCandidateAttempt(input: {
     repoRoot: input.repoRoot,
     manifestDir: input.manifestDir,
     manifest: input.manifest,
+    resolvedBaselineRef: input.resolvedBaselineRef,
     proposer: input.manifest.proposer,
     candidateId: input.baseCandidateId,
     runDir: input.runDir,
@@ -454,6 +464,7 @@ async function executeCandidateStrategy(input: {
   repoRoot: string;
   manifestDir: string;
   manifest: RalphManifest;
+  resolvedBaselineRef: string;
   proposer: LeafProposerConfig;
   candidateId: string;
   runDir: string;
@@ -462,7 +473,7 @@ async function executeCandidateStrategy(input: {
   judgeProvider?: JudgeProvider;
   historyContext?: { summary: string; path: string };
 }): Promise<CandidateAttemptResult> {
-  const workspace = await input.workspaceManager.createWorkspace(input.candidateId);
+  const workspace = await input.workspaceManager.createWorkspace(input.candidateId, input.resolvedBaselineRef);
   const proposal = await executeProposal(input.proposer, workspace.workspacePath, input.historyContext);
   const proposeStdoutPath = await persistText(
     join(input.runDir, "logs", `${input.candidateId}.propose.stdout.log`),
