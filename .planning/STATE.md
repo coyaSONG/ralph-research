@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: completed
 stopped_at: Phase 5 verification complete
-last_updated: "2026-04-05T13:10:12.000Z"
-last_activity: 2026-04-05 -- Phase 05 complete
+last_updated: "2026-04-06T14:18:46.000Z"
+last_activity: 2026-04-06 - Completed quick task 260406-wbs: Update README to match current CLI/runtime behavior and push the change
 progress:
   total_phases: 5
   completed_phases: 5
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-05)
 Phase: 5 of 5 (Regression Hardening Matrix)
 Plan: Complete
 Status: Milestone complete
-Last activity: 2026-04-05 -- Phase 05 complete
+Last activity: 2026-04-06 - Completed quick task 260406-wbs: Update README to match current CLI/runtime behavior and push the change
 
 Progress: [██████████] 100%
 
@@ -74,8 +74,14 @@ None yet.
 - Manual review still needs dedicated semantic unification so human accept/reject paths use the same promotion and frontier logic as automated acceptance.
 - None. All planned milestone phases are complete and verified.
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260406-wbs | Update README to match current CLI/runtime behavior and push the change | 2026-04-06 | 8e00559 | [260406-wbs-update-readme-to-match-current-cli-runti](./quick/260406-wbs-update-readme-to-match-current-cli-runti/) |
+
 ## Session Continuity
 
-Last session: 2026-04-05T13:10:12.000Z
-Stopped at: Phase 5 verification complete
+Last session: 2026-04-06T14:18:46.000Z
+Stopped at: Quick task 260406-wbs complete
 Resume file: .planning/ROADMAP.md
