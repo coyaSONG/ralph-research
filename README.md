@@ -13,6 +13,8 @@ The v0.1 focus is a writing workflow that is runnable in under five minutes on a
 
 ## Quickstart
 
+`init`, `demo`, and git-backed runs require a local Git CLI because `rrx` snapshots a baseline commit and creates detached candidate worktrees during execution.
+
 ### Zero-config demo
 
 ```bash
@@ -25,12 +27,19 @@ This creates a temporary writing repo, runs one accepted cycle, and prints the p
 
 ```bash
 npx ralph-research init --template writing
+npx ralph-research doctor
 npx ralph-research run --json
-npx ralph-research run --until-target --until-no-improve 3 --json
+npx ralph-research status --json
 npx ralph-research inspect run-0001 --json
 ```
 
 This path is the v0.1 success bar: `init -> run -> inspect` should work quickly and produce an acceptance reason you can inspect. The bundled template set is currently `writing` only.
+
+Progressive stop mode is opt-in. The bundled `writing` template ships with `stopping.target` commented out, so enable that block in `ralph.yaml` before running:
+
+```bash
+npx ralph-research run --until-target --until-no-improve 3 --json
+```
 
 ## Core Concepts
 
@@ -51,7 +60,7 @@ The bundled writing template is self-contained:
 - `scripts/metric.mjs`: local heuristic metric
 - `prompts/judge.md`: pairwise judge prompt you can upgrade to later
 
-The default template uses a local command metric so the first run does not require API keys. When you are ready, replace the numeric metric with an `llm_judge` extractor and use the included pairwise prompt as a starting point.
+The default template uses a local command metric so the first run does not require API keys. When you are ready for model-based scoring, change the metric to `kind: llm_score`, switch the extractor to `type: llm_judge`, and point it at a `judgePack` plus the included pairwise prompt as a starting point.
 
 ## CLI
 
@@ -61,7 +70,9 @@ rrx doctor
 rrx init --template writing
 rrx demo writing
 rrx run
+rrx run --fresh
 rrx run --until-target
+rrx run --until-no-improve 3
 rrx run --until-target --until-no-improve 3
 rrx status
 rrx frontier
@@ -71,13 +82,16 @@ rrx reject <runId>
 rrx serve-mcp --stdio
 ```
 
-`rrx run --cycles N` still executes a finite loop. Progressive modes are opt-in:
+`rrx run` executes one cycle by default and auto-resumes the latest recoverable run when one exists. Progressive modes are opt-in:
 
-- `--until-target`: keep iterating until `manifest.stopping.target` is satisfied
+- `--fresh`: start a new `runId` instead of auto-resuming the latest recoverable run
+- `--until-target`: keep iterating until `manifest.stopping.target` is satisfied; this flag errors if the manifest does not define that target
 - `--until-no-improve N`: stop after `N` consecutive cycles without a frontier improvement
 - `--cycles N` with a progressive flag: treat `N` as a max-cycle cap instead of an exact count
 
 `rrx status` now reports both the persisted latest run snapshot and the runtime view derived from the lock heartbeat, so `running (alive)` is distinguished from `stale (resumable)` and the output includes heartbeat and last-progress timestamps when available.
+
+If the latest run is waiting on manual review, `rrx run` blocks until you resolve that run with `rrx accept <runId>` or `rrx reject <runId>`.
 
 ## Stopping Targets
 
