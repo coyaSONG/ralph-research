@@ -105,6 +105,68 @@ describe("RunCycleService integration", () => {
     expect(storedFrontier[0]?.frontierId).toBe("frontier-existing");
   });
 
+  it("warns when git workspace command scripts have uncommitted changes", async () => {
+    const repoRoot = await initFixtureRepo("numeric");
+    await writeFile(join(repoRoot, "scripts", "metric.mjs"), 'console.log("0.95");\n', "utf8");
+
+    const service = new RunCycleService();
+    const result = await service.run({ repoRoot });
+
+    expect(result.status).toBe("accepted");
+    expect(result.warning).toContain("scripts/metric.mjs (metric quality)");
+  });
+
+  it("persists structured metric diagnostics into decision and run state", async () => {
+    const repoRoot = await initFixtureRepo("numeric");
+    const frontierStore = new JsonFileFrontierStore(join(repoRoot, ".ralph", "frontier.json"));
+
+    await frontierStore.save([
+      {
+        frontierId: "frontier-existing",
+        runId: "run-existing",
+        candidateId: "candidate-existing",
+        acceptedAt: "2026-03-29T00:00:00.000Z",
+        metrics: {
+          quality: {
+            metricId: "quality",
+            value: 0.8,
+            direction: "maximize",
+            details: {},
+          },
+        },
+        artifacts: [
+          {
+            id: "draft",
+            path: join(repoRoot, "docs", "draft.md"),
+          },
+        ],
+      },
+    ]);
+
+    await writeFile(
+      join(repoRoot, "scripts", "metric.mjs"),
+      'console.log(JSON.stringify({ value: 0, metricId: "overfit_safe_exact_rate", reasons: ["all_missing_features", "normalized_order_leak"] }));\n',
+      "utf8",
+    );
+    await writeFile(join(repoRoot, "ralph.yaml"), buildJsonMetricManifest(), "utf8");
+    await execa("git", ["add", "ralph.yaml", "scripts/metric.mjs"], { cwd: repoRoot });
+    await execa("git", ["commit", "-m", "switch metric extractor"], { cwd: repoRoot });
+
+    const service = new RunCycleService();
+    const result = await service.run({ repoRoot });
+
+    expect(result.status).toBe("rejected");
+    expect(result.runResult?.decision?.reason).toContain("all_missing_features");
+    expect(result.runResult?.decision?.diagnostics).toMatchObject({
+      sourceMetricId: "overfit_safe_exact_rate",
+      reasons: ["all_missing_features", "normalized_order_leak"],
+    });
+    expect(result.runResult?.run.metrics.quality?.details).toMatchObject({
+      sourceMetricId: "overfit_safe_exact_rate",
+      reasons: ["all_missing_features", "normalized_order_leak"],
+    });
+  });
+
   it("runs a needs_human cycle when low-confidence judge output cannot auto-accept", async () => {
     const repoRoot = await initFixtureRepo("judge");
     const frontierStore = new JsonFileFrontierStore(join(repoRoot, ".ralph", "frontier.json"));
@@ -855,6 +917,52 @@ function buildNumericManifest(options: { baselineRef?: string; workspace?: "git"
     "        type: command",
     '        command: "node scripts/metric.mjs"',
     "        parser: plain_number",
+    "constraints: []",
+    "frontier:",
+    "  strategy: single_best",
+    "  primaryMetric: quality",
+    "ratchet:",
+    "  type: epsilon_improve",
+    "  metric: quality",
+    "  epsilon: 0",
+    "storage:",
+    "  root: .ralph",
+    "",
+  ].join("\n");
+}
+
+function buildJsonMetricManifest(options: { baselineRef?: string; workspace?: "git" | "copy" } = {}): string {
+  return [
+    'schemaVersion: "0.1"',
+    "project:",
+    "  name: service-json-metric",
+    "  artifact: manuscript",
+    `  baselineRef: ${options.baselineRef ?? "main"}`,
+    `  workspace: ${options.workspace ?? "git"}`,
+    "scope:",
+    "  allowedGlobs:",
+    '    - "**/*.md"',
+    "  maxFilesChanged: 2",
+    "  maxLineDelta: 20",
+    "proposer:",
+    "  type: command",
+    '  command: "node scripts/propose.mjs"',
+    "experiment:",
+    "  run:",
+    '    command: "node scripts/experiment.mjs"',
+    "  outputs:",
+    "    - id: draft",
+    "      path: out/draft.md",
+    "metrics:",
+    "  catalog:",
+    "    - id: quality",
+    "      kind: numeric",
+    "      direction: maximize",
+    "      extractor:",
+    "        type: command",
+    '        command: "node scripts/metric.mjs"',
+    "        parser: json_path",
+    "        valuePath: $.value",
     "constraints: []",
     "frontier:",
     "  strategy: single_best",

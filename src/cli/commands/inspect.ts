@@ -32,12 +32,14 @@ export async function runInspectCommand(
     if (options.json) {
       io.stdout(JSON.stringify(result, null, 2));
     } else {
+      const selectedDiagnostics = result.decision?.diagnostics?.reasons.join(", ") ?? "n/a";
       io.stdout(
         [
           `run: ${result.run.runId} (${result.run.status})`,
           `recovery: ${result.recovery.classification} (${result.recovery.nextAction})`,
           `decision: ${result.decision?.outcome ?? "n/a"}`,
           `reason: ${result.explainability.decisionReason ?? "n/a"}`,
+          `diagnostics: ${selectedDiagnostics}`,
           `recovery reason: ${result.recovery.reason}`,
           `judge rationales: ${result.explainability.judgeRationales.length}`,
         ].join("\n"),

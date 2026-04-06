@@ -59,5 +59,12 @@ ratchet:
   metric: quality
   epsilon: 0
 
+# Optional progressive-stop contract:
+# stopping:
+#   target:
+#     metric: quality
+#     op: ">="
+#     value: 0.8
+
 storage:
   root: .ralph

@@ -19,7 +19,7 @@ const program = new Command();
 program
   .name("rrx")
   .description("Local-first runtime for recursive research improvement.")
-  .version("0.1.0");
+  .version("0.1.1");
 
 registerDoctorCommand(program);
 registerValidateCommand(program);

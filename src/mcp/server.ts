@@ -5,7 +5,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import * as z from "zod/v4";
 
 import { getProjectFrontier, getProjectStatus } from "../app/services/project-state-service.js";
-import { RunCycleService } from "../app/services/run-cycle-service.js";
+import { RunLoopService } from "../app/services/run-loop-service.js";
 
 export interface RalphResearchMcpServerOptions {
   repoRoot?: string;
@@ -17,7 +17,7 @@ export function createRalphResearchMcpServer(
   const defaultRepoRoot = resolve(options.repoRoot ?? process.cwd());
   const server = new McpServer({
     name: "ralph-research",
-    version: "0.1.0",
+    version: "0.1.1",
   });
 
   server.registerTool(
@@ -27,41 +27,29 @@ export function createRalphResearchMcpServer(
       inputSchema: {
         repoRoot: z.string().optional().describe("Repository root; defaults to the server working directory."),
         manifestPath: z.string().optional().describe("Optional path to the manifest file."),
-        cycles: z.number().int().min(1).max(20).default(1).describe("Number of cycles to run."),
+        cycles: z.number().int().min(1).max(100).optional().describe("Exact cycle count, or a max-cycle cap when used with progressive stop flags."),
+        untilTarget: z.boolean().default(false).describe("Keep running until manifest.stopping.target is met."),
+        untilNoImprove: z.number().int().min(1).max(100).optional().describe("Stop after N consecutive cycles without frontier improvement."),
         fresh: z.boolean().default(false).describe("Start a fresh run instead of auto-resuming the latest recoverable run."),
       },
     },
-    async ({ repoRoot, manifestPath, cycles = 1, fresh = false }) => {
-      const service = new RunCycleService();
+    async ({ repoRoot, manifestPath, cycles, untilTarget = false, untilNoImprove, fresh = false }) => {
+      const service = new RunLoopService();
       const resolvedRepoRoot = resolve(repoRoot ?? defaultRepoRoot);
-      const results = [];
-
-      for (let index = 0; index < cycles; index += 1) {
-        const result = await service.run({
-          repoRoot: resolvedRepoRoot,
-          ...(manifestPath ? { manifestPath } : {}),
-          fresh,
-        });
-        results.push(result);
-
-        if (result.status === "failed") {
-          break;
-        }
-      }
+      const result = await service.run({
+        repoRoot: resolvedRepoRoot,
+        ...(manifestPath ? { manifestPath } : {}),
+        ...(cycles === undefined ? {} : { cycles }),
+        ...(untilTarget ? { untilTarget } : {}),
+        ...(untilNoImprove === undefined ? {} : { untilNoImprove }),
+        fresh,
+      });
 
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(
-              {
-                ok: results.every((result) => result.status !== "failed"),
-                cycles,
-                results,
-              },
-              null,
-              2,
-            ),
+            text: JSON.stringify(result, null, 2),
           },
         ],
       };

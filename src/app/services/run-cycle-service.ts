@@ -1,4 +1,6 @@
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
+
+import { execa } from "execa";
 
 import { JsonFileDecisionStore } from "../../adapters/fs/json-file-decision-store.js";
 import { JsonFileFrontierStore } from "../../adapters/fs/json-file-frontier-store.js";
@@ -7,7 +9,7 @@ import { GitClient } from "../../adapters/git/git-client.js";
 import { acquireLock, releaseLock, renewLock } from "../../adapters/fs/lockfile.js";
 import { loadManifestFromFile } from "../../adapters/fs/manifest-loader.js";
 import type { JudgeProvider } from "../../adapters/judge/llm-judge-provider.js";
-import { DEFAULT_MANIFEST_FILENAME } from "../../core/manifest/schema.js";
+import { DEFAULT_MANIFEST_FILENAME, type CommandSpecConfig, type RalphManifest } from "../../core/manifest/schema.js";
 import { DEFAULT_STORAGE_ROOT } from "../../core/manifest/defaults.js";
 import { materializeFrontier } from "../../core/state/frontier-materializer.js";
 import { classifyRecovery, type RecoveryStatus } from "../../core/state/recovery-classifier.js";
@@ -79,7 +81,11 @@ export class RunCycleService {
         decision: latestDecision,
         frontier,
       });
-      let warning: string | undefined;
+      const warnings: string[] = [];
+      const workspaceWarning = await collectGitWorkspaceCommandWarning(repoRoot, loadedManifest.manifest);
+      if (workspaceWarning) {
+        warnings.push(workspaceWarning);
+      }
 
       if (latestRun && !input.fresh) {
         if (recovery.classification === "resumable") {
@@ -111,6 +117,7 @@ export class RunCycleService {
             lockPath,
             runResult,
             recovery,
+            ...(warnings.length > 0 ? { warning: warnings.join("\n") } : {}),
           };
         }
 
@@ -119,7 +126,7 @@ export class RunCycleService {
         }
 
         if (recovery.classification === "repair_required") {
-          warning = `Latest run ${latestRun.runId} requires repair: ${recovery.reason}. Starting a fresh run.`;
+          warnings.push(`Latest run ${latestRun.runId} requires repair: ${recovery.reason}. Starting a fresh run.`);
         }
       }
 
@@ -149,7 +156,7 @@ export class RunCycleService {
         manifestPath: loadedManifest.path,
         lockPath,
         runResult,
-        ...(warning ? { warning } : {}),
+        ...(warnings.length > 0 ? { warning: warnings.join("\n") } : {}),
         ...(latestRun ? { recovery } : {}),
       };
     } finally {
@@ -173,4 +180,118 @@ function startLockHeartbeat(path: string, token: string, ttlMs: number) {
       clearInterval(timer);
     },
   };
+}
+
+async function collectGitWorkspaceCommandWarning(
+  repoRoot: string,
+  manifest: RalphManifest,
+): Promise<string | undefined> {
+  if (manifest.project.workspace !== "git") {
+    return undefined;
+  }
+
+  const candidates = collectManifestCommandFiles(repoRoot, manifest);
+  if (candidates.length === 0) {
+    return undefined;
+  }
+
+  const commandPaths = [...new Set(candidates.map((candidate) => candidate.relativePath))];
+  const { stdout } = await execa("git", ["-C", repoRoot, "status", "--short", "--", ...commandPaths], {
+    reject: false,
+  });
+  const dirtyPaths = new Set(
+    stdout
+      .split("\n")
+      .filter((line) => line.trim().length > 0)
+      .map((line) => line.slice(3).trim()),
+  );
+  if (dirtyPaths.size === 0) {
+    return undefined;
+  }
+
+  const dirtyCandidates = candidates.filter((candidate) => dirtyPaths.has(candidate.relativePath));
+  if (dirtyCandidates.length === 0) {
+    return undefined;
+  }
+
+  const details = dirtyCandidates.map((candidate) => `${candidate.relativePath} (${candidate.role})`).join(", ");
+  return `Git workspace commands with uncommitted changes will be ignored inside candidate worktrees until committed: ${details}`;
+}
+
+function collectManifestCommandFiles(
+  repoRoot: string,
+  manifest: RalphManifest,
+): Array<{ relativePath: string; role: string }> {
+  const candidates: Array<{ relativePath: string; role: string }> = [];
+
+  const addCommandFile = (command: CommandSpecConfig, role: string) => {
+    const token = extractCommandFileToken(command.command);
+    if (!token) {
+      return;
+    }
+
+    const baseDir = resolve(repoRoot, command.cwd ?? ".");
+    const resolvedPath = resolve(baseDir, token);
+    const relativePath = relative(repoRoot, resolvedPath);
+    if (relativePath.startsWith("..")) {
+      return;
+    }
+
+    candidates.push({
+      relativePath,
+      role,
+    });
+  };
+
+  if (manifest.proposer.type === "command") {
+    addCommandFile(manifest.proposer, "proposer");
+  } else if (manifest.proposer.type === "parallel") {
+    for (const [index, strategy] of manifest.proposer.strategies.entries()) {
+      if (strategy.type === "command") {
+        addCommandFile(strategy, `proposer strategy ${index + 1}`);
+      }
+    }
+  }
+
+  addCommandFile(manifest.experiment.run, "experiment");
+
+  for (const metric of manifest.metrics.catalog) {
+    if (metric.extractor.type === "command") {
+      addCommandFile(metric.extractor, `metric ${metric.id}`);
+    }
+  }
+
+  return candidates;
+}
+
+function extractCommandFileToken(command: string): string | undefined {
+  const tokens = command.match(/"[^"]*"|'[^']*'|\S+/g)?.map((token) => token.replace(/^['"]|['"]$/g, "")) ?? [];
+  if (tokens.length === 0) {
+    return undefined;
+  }
+
+  const first = tokens[0];
+  const second = tokens[1];
+
+  if (first && looksLikeFilePath(first)) {
+    return first;
+  }
+
+  if (first && looksLikeInterpreter(first) && second && looksLikeFilePath(second)) {
+    return second;
+  }
+
+  return undefined;
+}
+
+function looksLikeInterpreter(token: string): boolean {
+  return ["node", "tsx", "python", "python3", "bash", "sh"].includes(token);
+}
+
+function looksLikeFilePath(token: string): boolean {
+  return token.startsWith("/")
+    || token.startsWith("./")
+    || token.startsWith("../")
+    || token.includes("/")
+    || /\.(?:mjs|cjs|js|ts|tsx|py|sh|bash)$/.test(token);
 }

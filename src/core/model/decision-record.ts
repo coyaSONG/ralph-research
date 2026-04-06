@@ -18,6 +18,12 @@ export const decisionRecordSchema = z.object({
   afterFrontierIds: z.array(z.string().min(1)).default([]),
   commitSha: z.string().min(1).optional(),
   auditRequired: z.boolean().default(false),
+  diagnostics: z
+    .object({
+      sourceMetricId: z.string().min(1).optional(),
+      reasons: z.array(z.string().min(1)).default([]),
+    })
+    .optional(),
   graduation: z
     .object({
       activatedPolicy: z.literal("epsilon_improve"),

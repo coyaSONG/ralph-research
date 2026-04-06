@@ -5,6 +5,7 @@ import { JsonFileFrontierStore } from "../../adapters/fs/json-file-frontier-stor
 import { JsonFileRunStore } from "../../adapters/fs/json-file-run-store.js";
 import { loadManifestFromFile } from "../../adapters/fs/manifest-loader.js";
 import { DEFAULT_MANIFEST_FILENAME } from "../../core/manifest/schema.js";
+import { summarizeMetricDiagnostics } from "../../core/model/metric-diagnostics.js";
 import type { DecisionRecord } from "../../core/model/decision-record.js";
 import type { FrontierEntry } from "../../core/model/frontier-entry.js";
 import type { RunRecord } from "../../core/model/run-record.js";
@@ -44,6 +45,12 @@ export interface InspectRunResult {
       delta?: number;
       confidence?: number;
       direction: "maximize" | "minimize";
+      sourceMetricId?: string;
+    }>;
+    metricDiagnostics: Array<{
+      metricId: string;
+      sourceMetricId?: string;
+      reasons: string[];
     }>;
     diffSummary: {
       filesChanged?: number;
@@ -141,13 +148,32 @@ export async function inspectRun(input: ProjectStateInput & { runId: string }): 
       ];
     });
 
-  const metricDeltas = Object.values(run.metrics).map((metric) => ({
-    metricId: metric.metricId,
-    value: metric.value,
-    direction: metric.direction,
-    ...(metric.confidence === undefined ? {} : { confidence: metric.confidence }),
-    ...(decision?.metricId === metric.metricId && decision.delta !== undefined ? { delta: decision.delta } : {}),
-  }));
+  const metricDeltas = Object.values(run.metrics).map((metric) => {
+    const diagnostics = summarizeMetricDiagnostics(metric);
+
+    return {
+      metricId: metric.metricId,
+      value: metric.value,
+      direction: metric.direction,
+      ...(metric.confidence === undefined ? {} : { confidence: metric.confidence }),
+      ...(diagnostics?.sourceMetricId ? { sourceMetricId: diagnostics.sourceMetricId } : {}),
+      ...(decision?.metricId === metric.metricId && decision.delta !== undefined ? { delta: decision.delta } : {}),
+    };
+  });
+  const metricDiagnostics = Object.values(run.metrics)
+    .map((metric) => {
+      const diagnostics = summarizeMetricDiagnostics(metric);
+      if (!diagnostics) {
+        return null;
+      }
+
+      return {
+        metricId: metric.metricId,
+        reasons: diagnostics.reasons,
+        ...(diagnostics.sourceMetricId ? { sourceMetricId: diagnostics.sourceMetricId } : {}),
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
 
   return {
     manifestPath,
@@ -163,6 +189,7 @@ export async function inspectRun(input: ProjectStateInput & { runId: string }): 
       decisionReason: decision?.reason ?? null,
       judgeRationales,
       metricDeltas,
+      metricDiagnostics,
       diffSummary: {
         ...(run.proposal.filesChanged === undefined ? {} : { filesChanged: run.proposal.filesChanged }),
         ...(run.proposal.diffLines === undefined ? {} : { lineDelta: run.proposal.diffLines }),

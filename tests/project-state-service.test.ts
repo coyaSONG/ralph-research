@@ -93,6 +93,61 @@ describe("project-state-service recovery read model", () => {
     expect(result.recovery.reason).toContain("commit sha");
   });
 
+  it("surfaces metric diagnostics and source ids in inspect output", async () => {
+    const repoRoot = join(tempRoot, "repo-metric-diagnostics");
+    await initNumericFixtureRepo(repoRoot);
+    await seedDecisionWrittenRun(repoRoot, {
+      status: "rejected",
+      decision: makeDecisionRecord({
+        outcome: "rejected",
+        reason: "quality candidate=0; diagnostics=all_missing_features,normalized_order_leak",
+        diagnostics: {
+          sourceMetricId: "overfit_safe_exact_rate",
+          reasons: ["all_missing_features", "normalized_order_leak"],
+        },
+      }),
+    });
+
+    const runStore = new JsonFileRunStore(join(repoRoot, ".ralph", "runs"));
+    await runStore.put(
+      makeRunRecord({
+        status: "rejected",
+        phase: "decision_written",
+        pendingAction: "none",
+        decisionId: "decision-run-0001",
+        metrics: {
+          quality: {
+            metricId: "quality",
+            value: 0,
+            direction: "maximize",
+            details: {
+              sourceMetricId: "overfit_safe_exact_rate",
+              reasons: ["all_missing_features", "normalized_order_leak"],
+            },
+          },
+        },
+      }),
+    );
+
+    const result = await inspectRun({
+      repoRoot,
+      runId: "run-0001",
+    });
+
+    expect(result.decision?.diagnostics).toMatchObject({
+      sourceMetricId: "overfit_safe_exact_rate",
+      reasons: ["all_missing_features", "normalized_order_leak"],
+    });
+    expect(result.explainability.metricDiagnostics).toEqual([
+      {
+        metricId: "quality",
+        sourceMetricId: "overfit_safe_exact_rate",
+        reasons: ["all_missing_features", "normalized_order_leak"],
+      },
+    ]);
+    expect(result.explainability.metricDeltas[0]?.sourceMetricId).toBe("overfit_safe_exact_rate");
+  });
+
   it("rebuilds frontier state from accepted records when the snapshot is missing", async () => {
     const repoRoot = join(tempRoot, "repo-frontier-rebuild");
     await initNumericFixtureRepo(repoRoot);

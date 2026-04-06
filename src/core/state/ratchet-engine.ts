@@ -1,4 +1,5 @@
 import type { ParetoObjectiveConfig, RatchetConfig } from "../manifest/schema.js";
+import { appendMetricDiagnostics } from "../model/metric-diagnostics.js";
 import type { FrontierEntry } from "../model/frontier-entry.js";
 import type { MetricResult } from "../model/metric.js";
 import { buildMetricComparisonReason, compareParetoFrontier, directionalDelta } from "./frontier-engine.js";
@@ -33,12 +34,13 @@ export function evaluateRatchet(input: RatchetInput): RatchetDecision {
   const metricId = "metric" in input.ratchet ? input.ratchet.metric ?? input.primaryMetric : input.primaryMetric;
 
   if (input.constraintFailureReason) {
+    const candidateMetric = input.candidateMetrics[metricId];
     return {
       outcome: "rejected",
       frontierChanged: false,
       metricId,
       policyType: input.ratchet.type,
-      reason: input.constraintFailureReason,
+      reason: candidateMetric ? appendMetricDiagnostics(input.constraintFailureReason, candidateMetric) : input.constraintFailureReason,
     };
   }
 
@@ -114,35 +116,35 @@ function evaluateEpsilonImprove(
   incumbentMetric?: MetricResult,
 ): RatchetDecision {
   if (!incumbentMetric) {
-    return {
+    return withMetricDiagnostics({
       outcome: "accepted",
       frontierChanged: true,
       metricId,
       policyType: "epsilon_improve",
       reason: `frontier empty; candidate accepted on metric ${metricId}`,
-    };
+    }, candidateMetric);
   }
 
   const delta = directionalDelta(candidateMetric, incumbentMetric);
   if (delta > epsilon) {
-    return {
+    return withMetricDiagnostics({
       outcome: "accepted",
       frontierChanged: true,
       metricId,
       policyType: "epsilon_improve",
       delta,
       reason: `${buildMetricComparisonReason(metricId, candidateMetric, incumbentMetric, delta, "improved")}; epsilon=${epsilon}`,
-    };
+    }, candidateMetric);
   }
 
-  return {
+  return withMetricDiagnostics({
     outcome: "rejected",
     frontierChanged: false,
     metricId,
     policyType: "epsilon_improve",
     delta,
     reason: `${buildMetricComparisonReason(metricId, candidateMetric, incumbentMetric, delta, "not_improved")}; epsilon=${epsilon}`,
-  };
+  }, candidateMetric);
 }
 
 function evaluateApprovalGate(
@@ -160,26 +162,26 @@ function evaluateApprovalGate(
 
   if (!incumbentMetric) {
     if (confidence === undefined) {
-      return {
+      return withMetricDiagnostics({
         outcome: "needs_human",
         frontierChanged: false,
         metricId,
         policyType: "approval_gate",
         reason: `frontier empty on metric ${metricId}, but candidate confidence is missing`,
-      };
+      }, candidateMetric);
     }
 
     if (confidence < minConfidence) {
-      return {
+      return withMetricDiagnostics({
         outcome: "needs_human",
         frontierChanged: false,
         metricId,
         policyType: "approval_gate",
         reason: `frontier empty on metric ${metricId}, but confidence ${confidence.toFixed(2)} is below threshold ${minConfidence.toFixed(2)}`,
-      };
+      }, candidateMetric);
     }
 
-    return {
+    return withMetricDiagnostics({
       outcome: "accepted",
       frontierChanged: true,
       metricId,
@@ -190,44 +192,44 @@ function evaluateApprovalGate(
             graduation: buildGraduationEvent(metricId, graduation, priorConsecutiveAccepts + 1),
           }
         : {}),
-    };
+    }, candidateMetric);
   }
 
   const delta = directionalDelta(candidateMetric, incumbentMetric);
   if (delta <= 0) {
-    return {
+    return withMetricDiagnostics({
       outcome: "rejected",
       frontierChanged: false,
       metricId,
       policyType: "approval_gate",
       delta,
       reason: buildMetricComparisonReason(metricId, candidateMetric, incumbentMetric, delta, "not_improved"),
-    };
+    }, candidateMetric);
   }
 
   if (confidence === undefined) {
-    return {
+    return withMetricDiagnostics({
       outcome: "needs_human",
       frontierChanged: false,
       metricId,
       policyType: "approval_gate",
       delta,
       reason: `${buildMetricComparisonReason(metricId, candidateMetric, incumbentMetric, delta, "improved")}; confidence missing`,
-    };
+    }, candidateMetric);
   }
 
   if (confidence < minConfidence) {
-    return {
+    return withMetricDiagnostics({
       outcome: "needs_human",
       frontierChanged: false,
       metricId,
       policyType: "approval_gate",
       delta,
       reason: `${buildMetricComparisonReason(metricId, candidateMetric, incumbentMetric, delta, "improved")}; confidence ${confidence.toFixed(2)} below threshold ${minConfidence.toFixed(2)}`,
-    };
+    }, candidateMetric);
   }
 
-  return {
+  return withMetricDiagnostics({
     outcome: "accepted",
     frontierChanged: true,
     metricId,
@@ -239,7 +241,7 @@ function evaluateApprovalGate(
           graduation: buildGraduationEvent(metricId, graduation, priorConsecutiveAccepts + 1),
         }
       : {}),
-  };
+  }, candidateMetric);
 }
 
 function buildGraduationEvent(
@@ -265,4 +267,14 @@ function getCandidateMetric(metrics: Record<string, MetricResult>, metricId: str
     throw new Error(`Missing candidate metric "${metricId}" for ratchet evaluation`);
   }
   return metric;
+}
+
+function withMetricDiagnostics(
+  decision: RatchetDecision,
+  candidateMetric: MetricResult,
+): RatchetDecision {
+  return {
+    ...decision,
+    reason: appendMetricDiagnostics(decision.reason, candidateMetric),
+  };
 }

@@ -16,6 +16,7 @@ import type {
 import type { ConstraintEvaluation } from "../state/constraint-engine.js";
 import type { DecisionRecord } from "../model/decision-record.js";
 import type { FrontierEntry } from "../model/frontier-entry.js";
+import { summarizeMetricDiagnostics } from "../model/metric-diagnostics.js";
 import type { MetricResult } from "../model/metric.js";
 import type { RunRecord } from "../model/run-record.js";
 import { evaluateAnchorAgreement, applyAnchorAgreementGate, loadAnchorRecords, type AnchorCheckResult } from "./anchor-checker.js";
@@ -244,6 +245,9 @@ export async function runCycle(
       beforeFrontierIds: frontier.map((entry) => entry.frontierId),
       afterFrontierIds: (frontierUpdate?.entries ?? frontier).map((entry) => entry.frontierId),
       auditRequired: false,
+      ...(buildDecisionDiagnostics(selectedCandidate.metrics[ratchetDecision.metricId])
+        ? { diagnostics: buildDecisionDiagnostics(selectedCandidate.metrics[ratchetDecision.metricId]) }
+        : {}),
       ...(ratchetDecision.graduation ? { graduation: ratchetDecision.graduation } : {}),
     };
     if (ratchetDecision.outcome === "accepted") {
@@ -550,6 +554,9 @@ async function runCommandCycle(
             beforeFrontierIds: frontier.map((entry) => entry.frontierId),
             afterFrontierIds: (frontierUpdate?.entries ?? frontier).map((entry) => entry.frontierId),
             auditRequired: false,
+            ...(buildDecisionDiagnostics(runRecord.metrics[decisionState.ratchetDecision.metricId])
+              ? { diagnostics: buildDecisionDiagnostics(runRecord.metrics[decisionState.ratchetDecision.metricId]) }
+              : {}),
             ...(decisionState.ratchetDecision.graduation ? { graduation: decisionState.ratchetDecision.graduation } : {}),
           };
           if (decisionState.ratchetDecision.outcome === "accepted") {
@@ -1483,6 +1490,22 @@ function stripConstraintReason(constraint: ConstraintEvaluation): Omit<Constrain
     actual: constraint.actual,
     expected: constraint.expected,
     op: constraint.op,
+  };
+}
+
+function buildDecisionDiagnostics(metric?: MetricResult): DecisionRecord["diagnostics"] | undefined {
+  if (!metric) {
+    return undefined;
+  }
+
+  const diagnostics = summarizeMetricDiagnostics(metric);
+  if (!diagnostics) {
+    return undefined;
+  }
+
+  return {
+    reasons: diagnostics.reasons,
+    ...(diagnostics.sourceMetricId ? { sourceMetricId: diagnostics.sourceMetricId } : {}),
   };
 }
 

@@ -26,6 +26,7 @@ This creates a temporary writing repo, runs one accepted cycle, and prints the p
 ```bash
 npx ralph-research init --template writing
 npx ralph-research run --json
+npx ralph-research run --until-target --until-no-improve 3 --json
 npx ralph-research inspect run-0001 --json
 ```
 
@@ -60,6 +61,8 @@ rrx doctor
 rrx init --template writing
 rrx demo writing
 rrx run
+rrx run --until-target
+rrx run --until-target --until-no-improve 3
 rrx status
 rrx frontier
 rrx inspect <runId>
@@ -67,6 +70,70 @@ rrx accept <runId>
 rrx reject <runId>
 rrx serve-mcp --stdio
 ```
+
+`rrx run --cycles N` still executes a finite loop. Progressive modes are opt-in:
+
+- `--until-target`: keep iterating until `manifest.stopping.target` is satisfied
+- `--until-no-improve N`: stop after `N` consecutive cycles without a frontier improvement
+- `--cycles N` with a progressive flag: treat `N` as a max-cycle cap instead of an exact count
+
+## Stopping Targets
+
+Use `stopping.target` when the workflow contract is "keep going until metric X reaches threshold Y":
+
+```yaml
+metrics:
+  catalog:
+    - id: exact_rate
+      kind: numeric
+      direction: maximize
+      extractor:
+        type: command
+        command: "python scripts/metric.py"
+        parser: plain_number
+
+frontier:
+  strategy: single_best
+  primaryMetric: exact_rate
+
+ratchet:
+  type: epsilon_improve
+  metric: exact_rate
+  epsilon: 0
+
+stopping:
+  target:
+    metric: exact_rate
+    op: ">="
+    value: 0.8
+```
+
+## Metric Diagnostics
+
+If a metric script can explain why a candidate was zeroed or downgraded, prefer JSON output plus `parser: json_path` so the reason survives into `run`, `decision`, and `inspect` output:
+
+```yaml
+metrics:
+  catalog:
+    - id: exact_rate
+      kind: numeric
+      direction: maximize
+      extractor:
+        type: command
+        command: "python scripts/metric.py"
+        parser: json_path
+        valuePath: $.value
+```
+
+```json
+{
+  "value": 0,
+  "metricId": "overfit_safe_exact_rate",
+  "reasons": ["all_missing_features", "normalized_order_leak"]
+}
+```
+
+When `project.workspace=git`, rrx now warns if proposer, experiment, or metric command files are dirty in the working tree, because detached candidate worktrees only see committed baseline content.
 
 ## MCP
 

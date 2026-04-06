@@ -29,24 +29,37 @@ export async function extractCommandMetric(
     throw new Error(`command metric extractor failed with exit code ${result.exitCode}: ${result.stderr || result.stdout}`);
   }
 
+  const parsedMetric = parseMetricValue(result.stdout, config);
+
   return {
     metricId: input.metricId,
     direction: input.direction,
-    value: parseMetricValue(result.stdout, config),
+    value: parsedMetric.value,
     details: {
       parser: config.parser,
       command: config.command,
       cwd,
+      ...(parsedMetric.details ? parsedMetric.details : {}),
     },
   };
 }
 
-function parseMetricValue(stdout: string, config: CommandMetricExtractorConfig): number {
+function parseMetricValue(
+  stdout: string,
+  config: CommandMetricExtractorConfig,
+): {
+  value: number;
+  details?: Record<string, unknown>;
+} {
   switch (config.parser) {
     case "plain_number":
-      return parseNumericValue(stdout.trim(), "plain_number");
+      return {
+        value: parseNumericValue(stdout.trim(), "plain_number"),
+      };
     case "regex":
-      return parseRegexValue(stdout, config.pattern);
+      return {
+        value: parseRegexValue(stdout, config.pattern),
+      };
     case "json_path":
       return parseJsonPathValue(stdout, config.valuePath);
   }
@@ -66,14 +79,25 @@ function parseRegexValue(stdout: string, pattern?: string): number {
   return parseNumericValue(candidate, "regex");
 }
 
-function parseJsonPathValue(stdout: string, valuePath?: string): number {
+function parseJsonPathValue(
+  stdout: string,
+  valuePath?: string,
+): {
+  value: number;
+  details?: Record<string, unknown>;
+} {
   if (!valuePath) {
     throw new Error('command metric extractor with parser="json_path" requires a valuePath');
   }
 
   const json = JSON.parse(stdout) as unknown;
   const value = readJsonPath(json, valuePath);
-  return parseNumericValue(value, "json_path");
+  const details = extractJsonMetricDetails(json);
+
+  return {
+    value: parseNumericValue(value, "json_path"),
+    ...(Object.keys(details).length > 0 ? { details } : {}),
+  };
 }
 
 function readJsonPath(root: unknown, path: string): unknown {
@@ -123,4 +147,40 @@ function parseNumericValue(value: unknown, parserName: string): number {
   }
 
   return numericValue;
+}
+
+function extractJsonMetricDetails(root: unknown): Record<string, unknown> {
+  if (!root || typeof root !== "object" || Array.isArray(root)) {
+    return {};
+  }
+
+  const record = root as Record<string, unknown>;
+  const details: Record<string, unknown> = {};
+
+  if (typeof record.reason === "string") {
+    details.reason = record.reason;
+  }
+  if (Array.isArray(record.reasons)) {
+    details.reasons = record.reasons.filter((entry): entry is string => typeof entry === "string");
+  }
+  if (typeof record.metricId === "string") {
+    details.sourceMetricId = record.metricId;
+  }
+  if (typeof record.sourceMetricId === "string") {
+    details.sourceMetricId = record.sourceMetricId;
+  }
+  if (Array.isArray(record.invalidReasons)) {
+    details.invalidReasons = record.invalidReasons.filter((entry): entry is string => typeof entry === "string");
+  }
+  if (Array.isArray(record.flags)) {
+    details.flags = record.flags.filter((entry): entry is string => typeof entry === "string");
+  }
+  if (Array.isArray(record.diagnostics)) {
+    details.diagnostics = record.diagnostics.filter((entry): entry is string => typeof entry === "string");
+  }
+  if (record.details && typeof record.details === "object" && !Array.isArray(record.details)) {
+    Object.assign(details, record.details);
+  }
+
+  return details;
 }

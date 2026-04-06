@@ -8,7 +8,7 @@ import { JsonFileRunStore } from "../src/adapters/fs/json-file-run-store.js";
 import { runRunCommand } from "../src/cli/commands/run.js";
 import { GitWorktreeWorkspaceManager } from "../src/core/engine/workspace-manager.js";
 import type { RunRecord } from "../src/core/model/run-record.js";
-import { createCapturingIo, initNumericFixtureRepo } from "./helpers/fixture-repo.js";
+import { createCapturingIo, initIncrementingMetricFixtureRepo, initNumericFixtureRepo } from "./helpers/fixture-repo.js";
 
 let tempRoot = "";
 let originalCwd = "";
@@ -101,6 +101,40 @@ describe("run command recovery contract", () => {
     expect(runs[0]?.phase).toBe("proposed");
     expect(runs[1]?.phase).toBe("committed");
     expect(runs[2]?.phase).toBe("completed");
+  });
+
+  it("keeps running until the manifest stopping target is met", async () => {
+    const repoRoot = join(tempRoot, "repo-until-target");
+    await initIncrementingMetricFixtureRepo(repoRoot);
+    process.chdir(repoRoot);
+
+    const io = createCapturingIo();
+    const exitCode = await runRunCommand({ json: true, untilTarget: true }, io);
+
+    expect(exitCode).toBe(0);
+    const payload = JSON.parse(io.stdoutText());
+    expect(payload.cyclesExecuted).toBe(2);
+    expect(payload.stopReason).toContain("target met");
+    expect(payload.target).toMatchObject({
+      met: true,
+      currentValue: 0.8,
+    });
+    expect(payload.results).toHaveLength(2);
+  });
+
+  it("stops after consecutive no-improve cycles in progressive mode", async () => {
+    const repoRoot = join(tempRoot, "repo-until-no-improve");
+    await initNumericFixtureRepo(repoRoot);
+    process.chdir(repoRoot);
+
+    const io = createCapturingIo();
+    const exitCode = await runRunCommand({ json: true, untilNoImprove: 2 }, io);
+
+    expect(exitCode).toBe(0);
+    const payload = JSON.parse(io.stdoutText());
+    expect(payload.cyclesExecuted).toBe(3);
+    expect(payload.stopReason).toContain("without frontier improvement");
+    expect(payload.results.map((result: { status: string }) => result.status)).toEqual(["accepted", "rejected", "rejected"]);
   });
 });
 

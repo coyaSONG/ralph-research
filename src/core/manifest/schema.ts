@@ -165,9 +165,11 @@ export const metricDefinitionSchema = z.discriminatedUnion("kind", [
   llmScoreMetricDefinitionSchema,
 ]);
 
+export const comparisonOperatorSchema = z.enum([">=", ">", "<=", "<", "=="]);
+
 export const constraintSchema = z.object({
   metric: z.string().min(1),
-  op: z.enum([">=", ">", "<=", "<", "=="]),
+  op: comparisonOperatorSchema,
   value: z.number(),
 });
 
@@ -221,6 +223,16 @@ export const ratchetSchema = z.discriminatedUnion("type", [
   paretoDominanceRatchetSchema,
 ]);
 
+export const stoppingTargetSchema = z.object({
+  metric: z.string().min(1).optional(),
+  op: comparisonOperatorSchema,
+  value: z.number(),
+});
+
+export const stoppingSchema = z.object({
+  target: stoppingTargetSchema.optional(),
+}).default({});
+
 export const storageSchema = z.object({
   root: z.string().min(1).default(DEFAULT_STORAGE_ROOT),
 });
@@ -238,6 +250,7 @@ const manifestShapeSchema = z.object({
   constraints: z.array(constraintSchema).default([]),
   frontier: frontierSchema,
   ratchet: ratchetSchema,
+  stopping: stoppingSchema,
   storage: storageSchema.default(manifestDefaults.storage),
 });
 
@@ -299,6 +312,14 @@ export const RalphManifestSchema = manifestShapeSchema.superRefine((manifest, ct
     }
   }
 
+  if (manifest.stopping.target?.metric && !metricIds.has(manifest.stopping.target.metric)) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: `stopping.target.metric references unknown metric "${manifest.stopping.target.metric}"`,
+      path: ["stopping", "target", "metric"],
+    });
+  }
+
   for (const [index, metric] of manifest.metrics.catalog.entries()) {
     if (metric.extractor.type === "llm_judge" && !judgePackIds.has(metric.extractor.judgePack)) {
       ctx.addIssue({
@@ -311,11 +332,14 @@ export const RalphManifestSchema = manifestShapeSchema.superRefine((manifest, ct
 });
 
 export type RalphManifest = z.infer<typeof RalphManifestSchema>;
+export type ComparisonOperator = z.infer<typeof comparisonOperatorSchema>;
 export type ProposerConfig = z.infer<typeof proposerSchema>;
 export type MetricExtractor = z.infer<typeof metricExtractorSchema>;
 export type JudgePack = z.infer<typeof judgePackSchema>;
 export type FrontierConfig = z.infer<typeof frontierSchema>;
 export type RatchetConfig = z.infer<typeof ratchetSchema>;
+export type StoppingConfig = z.infer<typeof stoppingSchema>;
+export type StoppingTargetConfig = z.infer<typeof stoppingTargetSchema>;
 export type CommandProposerConfig = z.infer<typeof commandProposerSchema>;
 export type ParallelProposerConfig = z.infer<typeof parallelProposerSchema>;
 export type CommandMetricExtractorConfig = z.infer<typeof commandMetricExtractorSchema>;

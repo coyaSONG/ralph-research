@@ -133,4 +133,32 @@ describe("command runtime adapters", () => {
     expect(regexMetric.value).toBeCloseTo(7.25);
     expect(jsonMetric.value).toBe(9);
   });
+
+  it("captures structured metric diagnostics from json_path extractor output", async () => {
+    const workspacePath = join(tempRoot, "workspace");
+    await mkdir(workspacePath, { recursive: true });
+
+    const jsonScript = join(tempRoot, "json-diagnostics.mjs");
+    await writeFile(
+      jsonScript,
+      'console.log(JSON.stringify({ value: 0, metricId: "overfit_safe_exact_rate", reasons: ["all_missing_features", "normalized_order_leak"] }));\n',
+      "utf8",
+    );
+
+    const metric = await extractCommandMetric(
+      {
+        type: "command",
+        command: `${JSON.stringify(process.execPath)} ${JSON.stringify(jsonScript)}`,
+        env: {},
+        timeoutSec: 10,
+        parser: "json_path",
+        valuePath: "$.value",
+      },
+      { metricId: "dev_exact_rate", direction: "maximize", workspacePath },
+    );
+
+    expect(metric.value).toBe(0);
+    expect(metric.details.sourceMetricId).toBe("overfit_safe_exact_rate");
+    expect(metric.details.reasons).toEqual(["all_missing_features", "normalized_order_leak"]);
+  });
 });

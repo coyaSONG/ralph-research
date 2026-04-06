@@ -1,12 +1,14 @@
 import type { Command } from "commander";
 
-import { RunCycleService } from "../../app/services/run-cycle-service.js";
+import { RunLoopService } from "../../app/services/run-loop-service.js";
 
 export interface RunCommandOptions {
   path?: string;
   cycles?: number;
   json?: boolean;
   fresh?: boolean;
+  untilTarget?: boolean;
+  untilNoImprove?: number;
 }
 
 export interface CommandIO {
@@ -28,29 +30,19 @@ export async function runRunCommand(
   io: CommandIO = defaultCommandIO,
 ): Promise<number> {
   try {
-    const service = new RunCycleService();
-    const cycles = options.cycles ?? 1;
-    const results = [];
+    const service = new RunLoopService();
+    const result = await service.run({
+      repoRoot: process.cwd(),
+      ...(options.path ? { manifestPath: options.path } : {}),
+      ...(options.fresh ? { fresh: options.fresh } : {}),
+      ...(options.cycles === undefined ? {} : { cycles: options.cycles }),
+      ...(options.untilTarget ? { untilTarget: options.untilTarget } : {}),
+      ...(options.untilNoImprove === undefined ? {} : { untilNoImprove: options.untilNoImprove }),
+    });
 
-    for (let index = 0; index < cycles; index += 1) {
-      const result = await service.run({
-        repoRoot: process.cwd(),
-        ...(options.path ? { manifestPath: options.path } : {}),
-        ...(options.fresh ? { fresh: options.fresh } : {}),
-      });
-      results.push(result);
-
-      if (result.warning && !options.json) {
-        io.stderr(result.warning);
-      }
-
-      if (result.status === "failed") {
-        if (options.json) {
-          io.stdout(JSON.stringify({ ok: false, results }, null, 2));
-        } else {
-          io.stderr(`Cycle ${index + 1} ended with status ${result.status}`);
-        }
-        return 1;
+    if (!options.json) {
+      for (const warning of result.warnings) {
+        io.stderr(warning);
       }
     }
 
@@ -58,20 +50,29 @@ export async function runRunCommand(
       io.stdout(
         JSON.stringify(
           {
-            ok: true,
-            cycles,
-            results,
+            ok: result.ok,
+            cycles: result.cycles,
+            cyclesExecuted: result.cyclesExecuted,
+            stopReason: result.stopReason,
+            warnings: result.warnings,
+            ...(result.target ? { target: result.target } : {}),
+            results: result.results,
           },
           null,
           2,
         ),
       );
     } else {
-      const latest = results.at(-1);
-      io.stdout(`Completed ${cycles} cycle(s); latest status=${latest?.status ?? "unknown"}`);
+      const latest = result.results.at(-1);
+      io.stdout(
+        [
+          `Executed ${result.cyclesExecuted} cycle(s); latest status=${latest?.status ?? "not_run"}`,
+          `stop: ${result.stopReason}`,
+        ].join("\n"),
+      );
     }
 
-    return 0;
+    return result.ok ? 0 : 1;
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to run cycle";
     if (options.json) {
@@ -86,9 +87,11 @@ export async function runRunCommand(
 export function registerRunCommand(program: Command): void {
   program
     .command("run")
-    .description("Run one or more research cycles.")
+    .description("Run one or more research cycles or keep iterating until a stop condition is met.")
     .option("-p, --path <path>", "Path to the manifest file")
-    .option("-c, --cycles <count>", "Number of cycles to run", (value) => Number.parseInt(value, 10), 1)
+    .option("-c, --cycles <count>", "Exact cycle count, or a max-cycle cap when used with progressive stop flags", (value) => Number.parseInt(value, 10))
+    .option("--until-target", "Keep running until manifest.stopping.target is met", false)
+    .option("--until-no-improve <count>", "Stop after N consecutive cycles without frontier improvement", (value) => Number.parseInt(value, 10))
     .option("--fresh", "Start a fresh run instead of auto-resuming the latest recoverable run", false)
     .option("--json", "Emit machine-readable output", false)
     .action(async (options: RunCommandOptions) => {

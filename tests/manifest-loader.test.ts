@@ -45,6 +45,54 @@ describe("loadManifestFromFile", () => {
     expect(loaded.manifest.ratchet.type).toBe("pareto_dominance");
   });
 
+  it("loads a manifest with a stopping target", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "ralph-research-manifest-"));
+    tempDirs.push(tempDir);
+    const manifestPath = join(tempDir, "target.ralph.yaml");
+    await writeFile(
+      manifestPath,
+      [
+        'schemaVersion: "0.1"',
+        "project:",
+        "  name: stopping-target",
+        "  artifact: code",
+        "proposer:",
+        "  type: command",
+        "  command: ./scripts/propose.sh",
+        "experiment:",
+        "  run:",
+        "    command: ./scripts/run.sh",
+        "metrics:",
+        "  catalog:",
+        "    - id: quality",
+        "      kind: numeric",
+        "      direction: maximize",
+        "      extractor:",
+        "        type: command",
+        "        command: ./scripts/metric.sh",
+        "        parser: plain_number",
+        "frontier:",
+        "  strategy: single_best",
+        "  primaryMetric: quality",
+        "ratchet:",
+        "  type: epsilon_improve",
+        "  metric: quality",
+        "  epsilon: 0",
+        "stopping:",
+        "  target:",
+        "    op: \">=\"",
+        "    value: 0.8",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const loaded = await loadManifestFromFile(manifestPath);
+    expect(loaded.manifest.stopping.target).toMatchObject({
+      op: ">=",
+      value: 0.8,
+    });
+  });
+
   it("rejects invalid pareto frontier combinations", async () => {
     await expect(loadManifestFromFile(new URL("invalid-pareto.ralph.yaml", fixturesDir).pathname)).rejects.toMatchObject({
       name: "ManifestLoadError",
@@ -57,6 +105,51 @@ describe("loadManifestFromFile", () => {
 
   it("rejects unknown ratchet metric references", async () => {
     await expect(loadManifestFromFile(new URL("invalid-ratchet-metric.ralph.yaml", fixturesDir).pathname)).rejects.toBeInstanceOf(ManifestLoadError);
+  });
+
+  it("rejects unknown stopping target metric references", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "ralph-research-manifest-"));
+    tempDirs.push(tempDir);
+    const manifestPath = join(tempDir, "invalid-target.ralph.yaml");
+    await writeFile(
+      manifestPath,
+      [
+        'schemaVersion: "0.1"',
+        "project:",
+        "  name: invalid-stopping-target",
+        "  artifact: code",
+        "proposer:",
+        "  type: command",
+        "  command: ./scripts/propose.sh",
+        "experiment:",
+        "  run:",
+        "    command: ./scripts/run.sh",
+        "metrics:",
+        "  catalog:",
+        "    - id: quality",
+        "      kind: numeric",
+        "      direction: maximize",
+        "      extractor:",
+        "        type: command",
+        "        command: ./scripts/metric.sh",
+        "        parser: plain_number",
+        "frontier:",
+        "  strategy: single_best",
+        "  primaryMetric: quality",
+        "ratchet:",
+        "  type: epsilon_improve",
+        "  metric: quality",
+        "  epsilon: 0",
+        "stopping:",
+        "  target:",
+        "    metric: missing_metric",
+        "    op: \">=\"",
+        "    value: 0.8",
+      ].join("\n"),
+      "utf8",
+    );
+
+    await expect(loadManifestFromFile(manifestPath)).rejects.toBeInstanceOf(ManifestLoadError);
   });
 
   it("rejects unsupported workspace declarations with admission details", async () => {
