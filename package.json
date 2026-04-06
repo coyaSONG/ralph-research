@@ -4,7 +4,7 @@
   "description": "Local-first runtime for recursive research improvement.",
   "type": "module",
   "bin": {
-    "rrx": "./dist/cli/main.js"
+    "rrx": "dist/cli/main.js"
   },
   "files": [
     "dist",
