@@ -77,6 +77,8 @@ rrx serve-mcp --stdio
 - `--until-no-improve N`: stop after `N` consecutive cycles without a frontier improvement
 - `--cycles N` with a progressive flag: treat `N` as a max-cycle cap instead of an exact count
 
+`rrx status` now reports both the persisted latest run snapshot and the runtime view derived from the lock heartbeat, so `running (alive)` is distinguished from `stale (resumable)` and the output includes heartbeat and last-progress timestamps when available.
+
 ## Stopping Targets
 
 Use `stopping.target` when the workflow contract is "keep going until metric X reaches threshold Y":

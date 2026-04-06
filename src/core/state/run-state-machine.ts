@@ -48,17 +48,34 @@ export function advanceRunPhase(
   }
 
   const resolvedPhase = nextIndex === currentIndex ? run.phase : nextPhase;
+  const at = options.at ?? new Date().toISOString();
   const status = options.status ?? inferStatusForPhase(run.status, resolvedPhase);
   const pendingAction = options.pendingAction ?? derivePendingAction({ ...run, status, phase: resolvedPhase });
+  if (
+    resolvedPhase === run.phase
+    && status === run.status
+    && pendingAction === run.pendingAction
+    && options.decisionId === undefined
+    && options.error === undefined
+    && options.at === undefined
+  ) {
+    return runRecordSchema.parse(run);
+  }
+
+  const currentStepStartedAt = pendingAction !== run.pendingAction
+    ? at
+    : run.currentStepStartedAt ?? run.updatedAt ?? run.startedAt;
 
   const updated: RunRecord = runRecordSchema.parse({
     ...run,
     status,
     phase: resolvedPhase,
     pendingAction: pendingActionSchema.parse(pendingAction),
+    updatedAt: at,
+    currentStepStartedAt,
     decisionId: options.decisionId ?? run.decisionId,
     error: options.error ?? run.error,
-    endedAt: resolvedPhase === "completed" || resolvedPhase === "failed" ? options.at ?? run.endedAt ?? new Date().toISOString() : run.endedAt,
+    endedAt: resolvedPhase === "completed" || resolvedPhase === "failed" ? at : run.endedAt,
   });
 
   return updated;

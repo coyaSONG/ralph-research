@@ -43,6 +43,8 @@ export const runRecordSchema = z
     phase: runPhaseSchema,
     pendingAction: pendingActionSchema.default("none"),
     startedAt: z.string().datetime(),
+    updatedAt: z.string().datetime().optional(),
+    currentStepStartedAt: z.string().datetime().optional(),
     endedAt: z.string().datetime().optional(),
     manifestHash: z.string().min(1),
     workspaceRef: z.string().min(1),

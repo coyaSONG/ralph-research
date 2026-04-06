@@ -37,6 +37,13 @@ export interface LockHandle {
   metadata: LockfileMetadata;
 }
 
+export interface LockRuntimeState {
+  metadata: LockfileMetadata;
+  processAlive: boolean;
+  stale: boolean;
+  heartbeatAgeMs: number;
+}
+
 export class LockAcquisitionError extends Error {
   public readonly metadata: LockfileMetadata | undefined;
   public readonly heartbeatAgeMs: number | undefined;
@@ -145,17 +152,29 @@ export async function releaseLock(path: string, token?: string): Promise<void> {
 }
 
 export async function isStaleLock(path: string): Promise<boolean> {
-  const metadata = await readLockMetadata(path);
-  if (!metadata) {
+  const runtime = await inspectLock(path);
+  if (!runtime) {
     return false;
   }
 
-  const ageMs = Date.now() - Date.parse(metadata.updatedAt);
-  if (ageMs > metadata.ttlMs + metadata.graceMs) {
-    return true;
+  return runtime.stale;
+}
+
+export async function inspectLock(path: string): Promise<LockRuntimeState | null> {
+  const metadata = await readLockMetadata(path);
+  if (!metadata) {
+    return null;
   }
 
-  return !isProcessAlive(metadata.pid);
+  const heartbeatAgeMs = Date.now() - Date.parse(metadata.updatedAt);
+  const processAlive = isProcessAlive(metadata.pid);
+
+  return {
+    metadata,
+    processAlive,
+    stale: heartbeatAgeMs > metadata.ttlMs + metadata.graceMs || !processAlive,
+    heartbeatAgeMs,
+  };
 }
 
 export async function readLockMetadata(path: string): Promise<LockfileMetadata | null> {

@@ -38,6 +38,10 @@ describe("MCP server recovery parity", () => {
       nextAction: "none",
       resumeAllowed: false,
     });
+    expect(payload.runtime).toMatchObject({
+      state: "stopped",
+      reason: "repair required",
+    });
   });
 
   it("auto-resumes the latest recoverable run through run_research_cycle", async () => {
@@ -69,6 +73,8 @@ async function seedProposedRun(repoRoot: string): Promise<void> {
     makeRunRecord({
       phase: "proposed",
       pendingAction: "execute_experiment",
+      updatedAt: "2026-03-29T00:01:00.000Z",
+      currentStepStartedAt: "2026-03-29T00:01:00.000Z",
       workspacePath: workspace.workspacePath,
       proposal: {
         proposerType: "command",

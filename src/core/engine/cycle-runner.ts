@@ -930,6 +930,8 @@ function createInitialRunRecord(
     phase: "started",
     pendingAction: "prepare_proposal",
     startedAt: context.startedAt,
+    updatedAt: context.startedAt,
+    currentStepStartedAt: context.startedAt,
     manifestHash: context.manifestHash,
     workspaceRef: resolvedBaselineRef,
     ...(workspacePath ? { workspacePath } : {}),

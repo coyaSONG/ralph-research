@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { acquireLock, releaseLock } from "../src/adapters/fs/lockfile.js";
 import { JsonFileRunStore } from "../src/adapters/fs/json-file-run-store.js";
 import { runInspectCommand } from "../src/cli/commands/inspect.js";
 import { runStatusCommand } from "../src/cli/commands/status.js";
@@ -37,7 +38,34 @@ describe("status and inspect recovery output", () => {
     const exitCode = await runStatusCommand({}, io);
 
     expect(exitCode).toBe(0);
+    expect(io.stdoutText()).toContain("runtime: stale (resumable)");
     expect(io.stdoutText()).toContain("recovery: resumable (execute_experiment)");
+    expect(io.stdoutText()).toContain("current step: execute_experiment");
+  });
+
+  it("shows a live runtime summary when the heartbeat is active", async () => {
+    const repoRoot = join(tempRoot, "repo-status-alive");
+    await initNumericFixtureRepo(repoRoot);
+    await seedProposedRun(repoRoot);
+    process.chdir(repoRoot);
+
+    const lock = await acquireLock(join(repoRoot, ".ralph", "lock"), {
+      owner: {
+        operation: "run-cycle",
+      },
+    });
+
+    try {
+      const io = createCapturingIo();
+      const exitCode = await runStatusCommand({}, io);
+
+      expect(exitCode).toBe(0);
+      expect(io.stdoutText()).toContain("runtime: running (alive)");
+      expect(io.stdoutText()).toContain(`pid: ${process.pid}`);
+      expect(io.stdoutText()).toContain("heartbeat:");
+    } finally {
+      await releaseLock(lock.path, lock.metadata.token);
+    }
   });
 
   it("includes a dedicated recovery section in inspect JSON output", async () => {
@@ -74,6 +102,8 @@ async function seedProposedRun(repoRoot: string): Promise<void> {
     makeRunRecord({
       phase: "proposed",
       pendingAction: "execute_experiment",
+      updatedAt: "2026-03-29T00:01:00.000Z",
+      currentStepStartedAt: "2026-03-29T00:01:00.000Z",
       workspacePath: workspace.workspacePath,
       proposal: {
         proposerType: "command",

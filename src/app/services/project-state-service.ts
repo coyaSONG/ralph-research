@@ -3,14 +3,16 @@ import { join, resolve } from "node:path";
 import { JsonFileDecisionStore } from "../../adapters/fs/json-file-decision-store.js";
 import { JsonFileFrontierStore } from "../../adapters/fs/json-file-frontier-store.js";
 import { JsonFileRunStore } from "../../adapters/fs/json-file-run-store.js";
+import { inspectLock, type LockRuntimeState } from "../../adapters/fs/lockfile.js";
 import { loadManifestFromFile } from "../../adapters/fs/manifest-loader.js";
+import { DEFAULT_STORAGE_ROOT } from "../../core/manifest/defaults.js";
 import { DEFAULT_MANIFEST_FILENAME } from "../../core/manifest/schema.js";
 import { summarizeMetricDiagnostics } from "../../core/model/metric-diagnostics.js";
 import type { DecisionRecord } from "../../core/model/decision-record.js";
 import type { FrontierEntry } from "../../core/model/frontier-entry.js";
-import type { RunRecord } from "../../core/model/run-record.js";
+import type { PendingAction, RunRecord } from "../../core/model/run-record.js";
 import { materializeFrontier } from "../../core/state/frontier-materializer.js";
-import { classifyRecovery, type RecoveryStatus } from "../../core/state/recovery-classifier.js";
+import { classifyRecovery, derivePendingAction, type RecoveryStatus } from "../../core/state/recovery-classifier.js";
 
 export interface ProjectStateInput {
   repoRoot: string;
@@ -21,9 +23,27 @@ export interface ProjectStatus {
   manifestPath: string;
   latestRun: RunRecord | null;
   recovery: RecoveryStatus;
+  runtime: ProjectRuntimeStatus;
   frontier: FrontierEntry[];
   pendingHumanRuns: RunRecord[];
   decisions: DecisionRecord[];
+}
+
+export type RuntimeState = "idle" | "running" | "stale" | "stopped";
+
+export interface ProjectRuntimeStatus {
+  state: RuntimeState;
+  processAlive: boolean;
+  stale: boolean;
+  resumable: boolean;
+  reason: string;
+  lockPath: string;
+  pid?: number;
+  lastHeartbeatAt?: string;
+  heartbeatAgeMs?: number;
+  currentStep: PendingAction;
+  currentStepStartedAt?: string;
+  lastProgressAt?: string;
 }
 
 export interface InspectRunResult {
@@ -69,7 +89,7 @@ export class RunNotFoundError extends Error {
 }
 
 export async function getProjectStatus(input: ProjectStateInput): Promise<ProjectStatus> {
-  const { manifestPath, manifest, runStore, decisionStore, frontierStore } = await loadProjectStores(input);
+  const { manifestPath, manifest, runStore, decisionStore, frontierStore, lockPath } = await loadProjectStores(input);
   const runs = await runStore.list();
   const decisions = await decisionStore.list();
   const frontier = await materializeFrontier({
@@ -82,14 +102,22 @@ export async function getProjectStatus(input: ProjectStateInput): Promise<Projec
   const latestDecision = latestRun?.decisionId
     ? decisions.find((decision) => decision.decisionId === latestRun.decisionId) ?? await decisionStore.get(latestRun.decisionId)
     : null;
+  const recovery = classifyRecovery({
+    latestRun,
+    decision: latestDecision,
+    frontier,
+  });
+  const lockRuntime = await inspectLock(lockPath);
 
   return {
     manifestPath,
     latestRun,
-    recovery: classifyRecovery({
+    recovery,
+    runtime: describeRuntime({
       latestRun,
-      decision: latestDecision,
-      frontier,
+      recovery,
+      lockPath,
+      lockRuntime,
     }),
     frontier,
     pendingHumanRuns: runs.filter((run) => run.status === "needs_human"),
@@ -209,8 +237,115 @@ async function loadProjectStores(input: ProjectStateInput) {
   return {
     manifestPath: loadedManifest.path,
     manifest: loadedManifest.manifest,
+    lockPath: join(repoRoot, DEFAULT_STORAGE_ROOT, "lock"),
     runStore: new JsonFileRunStore(join(storageRoot, "runs")),
     decisionStore: new JsonFileDecisionStore(join(storageRoot, "decisions")),
     frontierStore: new JsonFileFrontierStore(join(storageRoot, "frontier.json")),
+  };
+}
+
+function describeRuntime(input: {
+  latestRun: RunRecord | null;
+  recovery: RecoveryStatus;
+  lockPath: string;
+  lockRuntime: LockRuntimeState | null;
+}): ProjectRuntimeStatus {
+  const currentStep = getCurrentStep(input.latestRun);
+  const lastProgressAt = input.latestRun
+    ? input.latestRun.updatedAt ?? input.latestRun.endedAt ?? input.latestRun.startedAt
+    : undefined;
+  const currentStepStartedAt = input.latestRun
+    ? input.latestRun.currentStepStartedAt ?? input.latestRun.updatedAt ?? input.latestRun.startedAt
+    : undefined;
+  const processAlive = input.lockRuntime?.processAlive ?? false;
+  const stale = input.lockRuntime?.stale ?? false;
+  const runCycleLock = input.lockRuntime
+    ? (input.lockRuntime.metadata.owner?.operation ?? "run-cycle") === "run-cycle"
+    : false;
+
+  if (input.recovery.classification === "resumable") {
+    if (processAlive && !stale && runCycleLock) {
+      return {
+        state: "running",
+        processAlive,
+        stale: false,
+        resumable: true,
+        reason: "live run-cycle heartbeat present",
+        lockPath: input.lockPath,
+        currentStep,
+        ...(input.lockRuntime ? buildLockDetails(input.lockRuntime) : {}),
+        ...(currentStepStartedAt ? { currentStepStartedAt } : {}),
+        ...(lastProgressAt ? { lastProgressAt } : {}),
+      };
+    }
+
+    return {
+      state: "stale",
+      processAlive,
+      stale: true,
+      resumable: true,
+      reason: "latest run is resumable but no live run-cycle heartbeat is present",
+      lockPath: input.lockPath,
+      currentStep,
+      ...(input.lockRuntime ? buildLockDetails(input.lockRuntime) : {}),
+      ...(currentStepStartedAt ? { currentStepStartedAt } : {}),
+      ...(lastProgressAt ? { lastProgressAt } : {}),
+    };
+  }
+
+  if (input.recovery.classification === "manual_review_blocked") {
+    return {
+      state: "stopped",
+      processAlive,
+      stale,
+      resumable: false,
+      reason: "manual review blocked",
+      lockPath: input.lockPath,
+      currentStep: "none",
+      ...(input.lockRuntime ? buildLockDetails(input.lockRuntime) : {}),
+      ...(lastProgressAt ? { lastProgressAt } : {}),
+    };
+  }
+
+  if (input.recovery.classification === "repair_required") {
+    return {
+      state: "stopped",
+      processAlive,
+      stale,
+      resumable: false,
+      reason: "repair required",
+      lockPath: input.lockPath,
+      currentStep: "none",
+      ...(input.lockRuntime ? buildLockDetails(input.lockRuntime) : {}),
+      ...(lastProgressAt ? { lastProgressAt } : {}),
+    };
+  }
+
+  return {
+    state: "idle",
+    processAlive,
+    stale,
+    resumable: false,
+    reason: "no live run is expected",
+    lockPath: input.lockPath,
+    currentStep: "none",
+    ...(input.lockRuntime ? buildLockDetails(input.lockRuntime) : {}),
+    ...(lastProgressAt ? { lastProgressAt } : {}),
+  };
+}
+
+function getCurrentStep(run: RunRecord | null): PendingAction {
+  if (!run) {
+    return "none";
+  }
+
+  return run.pendingAction !== "none" ? run.pendingAction : derivePendingAction(run);
+}
+
+function buildLockDetails(lockRuntime: LockRuntimeState): Pick<ProjectRuntimeStatus, "pid" | "lastHeartbeatAt" | "heartbeatAgeMs"> {
+  return {
+    pid: lockRuntime.metadata.pid,
+    lastHeartbeatAt: lockRuntime.metadata.updatedAt,
+    heartbeatAgeMs: lockRuntime.heartbeatAgeMs,
   };
 }

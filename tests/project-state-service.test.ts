@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { acquireLock, releaseLock } from "../src/adapters/fs/lockfile.js";
 import { JsonFileDecisionStore } from "../src/adapters/fs/json-file-decision-store.js";
 import { JsonFileFrontierStore } from "../src/adapters/fs/json-file-frontier-store.js";
 import { JsonFileRunStore } from "../src/adapters/fs/json-file-run-store.js";
@@ -53,6 +54,73 @@ describe("project-state-service recovery read model", () => {
       classification: "resumable",
       nextAction: "execute_experiment",
       resumeAllowed: true,
+    });
+  });
+
+  it("reports a live runtime view when the run-cycle heartbeat is active", async () => {
+    const repoRoot = join(tempRoot, "repo-runtime-alive");
+    await initNumericFixtureRepo(repoRoot);
+    await seedProposedRun(repoRoot);
+
+    const lock = await acquireLock(join(repoRoot, ".ralph", "lock"), {
+      owner: {
+        operation: "run-cycle",
+      },
+    });
+
+    try {
+      const status = await getProjectStatus({ repoRoot });
+
+      expect(status.runtime).toMatchObject({
+        state: "running",
+        processAlive: true,
+        stale: false,
+        resumable: true,
+        pid: process.pid,
+        currentStep: "execute_experiment",
+        currentStepStartedAt: "2026-03-29T00:01:00.000Z",
+        lastProgressAt: "2026-03-29T00:01:00.000Z",
+      });
+      expect(status.runtime.lastHeartbeatAt).toBeTruthy();
+    } finally {
+      await releaseLock(lock.path, lock.metadata.token);
+    }
+  });
+
+  it("reports stale resumable runtime metadata when only the persisted checkpoint remains", async () => {
+    const repoRoot = join(tempRoot, "repo-runtime-stale");
+    await initNumericFixtureRepo(repoRoot);
+    await seedProposedRun(repoRoot);
+    await mkdir(join(repoRoot, ".ralph"), { recursive: true });
+    await writeFile(
+      join(repoRoot, ".ralph", "lock"),
+      `${JSON.stringify({
+        pid: 999_999,
+        token: "stale-token",
+        createdAt: "2026-04-06T13:45:00.000Z",
+        updatedAt: "2026-04-06T13:49:10.000Z",
+        ttlMs: 300_000,
+        graceMs: 30_000,
+        owner: {
+          operation: "run-cycle",
+        },
+      }, null, 2)}\n`,
+      "utf8",
+    );
+
+    const status = await getProjectStatus({ repoRoot });
+
+    expect(status.latestRun?.status).toBe("running");
+    expect(status.runtime).toMatchObject({
+      state: "stale",
+      processAlive: false,
+      stale: true,
+      resumable: true,
+      pid: 999_999,
+      lastHeartbeatAt: "2026-04-06T13:49:10.000Z",
+      currentStep: "execute_experiment",
+      currentStepStartedAt: "2026-03-29T00:01:00.000Z",
+      lastProgressAt: "2026-03-29T00:01:00.000Z",
     });
   });
 
@@ -277,6 +345,8 @@ async function seedProposedRun(repoRoot: string): Promise<void> {
     makeRunRecord({
       phase: "proposed",
       pendingAction: "execute_experiment",
+      updatedAt: "2026-03-29T00:01:00.000Z",
+      currentStepStartedAt: "2026-03-29T00:01:00.000Z",
       workspacePath: workspace.workspacePath,
       proposal: {
         proposerType: "command",
