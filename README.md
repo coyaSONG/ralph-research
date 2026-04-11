@@ -12,6 +12,14 @@ Local-first runtime for recursive research improvement over real artifacts.
 
 The current product bar is reliability, not breadth. The bundled success path is the `writing` template, while the runtime itself is manifest-driven and reusable for other local workflows.
 
+## Trust Signals
+
+- Actual shipped surfaces: CLI binary `rrx` and stdio MCP server
+- Development verification commands: `npm test`, `npm run typecheck`, `npm run build`
+- Persisted runtime evidence: runs, decisions, frontier, and lock metadata
+- Recovery semantics are enforced by code and persisted state, not described only in prompts
+- Supported onboarding path is intentionally narrower than the full manifest surface
+
 ## What It Is
 
 - A Node/TypeScript runtime with a real CLI: `rrx`
@@ -119,7 +127,10 @@ npx ralph-research run --until-target --until-no-improve 3 --json
 ## More Docs
 
 - [docs/operation-model.md](docs/operation-model.md): lifecycle, persisted state, recovery classes
+- [docs/playbook.md](docs/playbook.md): situation-to-command operator guide
 - [docs/examples.md](docs/examples.md): quickstart and manifest examples pulled from shipped templates and fixtures
+- [docs/examples-catalog.md](docs/examples-catalog.md): broader scenario catalog grounded in shipped templates and test fixtures
+- [docs/comparison.md](docs/comparison.md): why this runtime is narrower and more stateful than prompt-only loop systems
 - [docs/faq.md](docs/faq.md): common runtime, recovery, and inspection questions
 - [docs/knowledge/INDEX.md](docs/knowledge/INDEX.md): project knowledge log
 

@@ -5,6 +5,8 @@ These examples are intentionally split into two groups:
 - shipped onboarding paths that work directly with the repo today
 - manifest snippets that reflect runtime capabilities already covered by fixtures and tests
 
+For a broader scenario catalog, see [docs/examples-catalog.md](examples-catalog.md).
+
 ## Shipped Quickstart Paths
 
 ### Disposable writing demo

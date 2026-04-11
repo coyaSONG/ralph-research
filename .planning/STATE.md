@@ -4,8 +4,8 @@ milestone: v1.0
 milestone_name: milestone
 status: completed
 stopped_at: Phase 5 verification complete
-last_updated: "2026-04-11T09:04:35Z"
-last_activity: 2026-04-11 - Completed quick task 260411-osa: Improve README entry UX and add operator docs for runtime model, examples, and FAQ
+last_updated: "2026-04-11T10:16:29Z"
+last_activity: 2026-04-11 - Completed quick task 260411-qq0: Absorb remaining onboarding and packaging strengths: trust signals, playbook, richer examples, and comparison framing
 progress:
   total_phases: 5
   completed_phases: 5
@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2026-04-05)
 Phase: 5 of 5 (Regression Hardening Matrix)
 Plan: Complete
 Status: Milestone complete
-Last activity: 2026-04-11 - Completed quick task 260411-osa: Improve README entry UX and add operator docs for runtime model, examples, and FAQ
+Last activity: 2026-04-11 - Completed quick task 260411-qq0: Absorb remaining onboarding and packaging strengths: trust signals, playbook, richer examples, and comparison framing
 
 Progress: [██████████] 100%
 
@@ -78,11 +78,12 @@ None yet.
 
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
-| 260411-osa | Improve README entry UX and add operator docs for runtime model, examples, and FAQ | 2026-04-11 | pending | [260411-osa-improve-readme-entry-ux-and-add-operator](./quick/260411-osa-improve-readme-entry-ux-and-add-operator/) |
+| 260411-qq0 | Absorb remaining onboarding and packaging strengths: trust signals, playbook, richer examples, and comparison framing | 2026-04-11 | pending | [260411-qq0-absorb-remaining-onboarding-and-packagin](./quick/260411-qq0-absorb-remaining-onboarding-and-packagin/) |
+| 260411-osa | Improve README entry UX and add operator docs for runtime model, examples, and FAQ | 2026-04-11 | b1fa873 | [260411-osa-improve-readme-entry-ux-and-add-operator](./quick/260411-osa-improve-readme-entry-ux-and-add-operator/) |
 | 260406-wbs | Update README to match current CLI/runtime behavior and push the change | 2026-04-06 | 8e00559 | [260406-wbs-update-readme-to-match-current-cli-runti](./quick/260406-wbs-update-readme-to-match-current-cli-runti/) |
 
 ## Session Continuity
 
-Last session: 2026-04-11T09:04:35Z
-Stopped at: Quick task 260411-osa complete
+Last session: 2026-04-11T10:16:29Z
+Stopped at: Quick task 260411-qq0 complete
 Resume file: .planning/ROADMAP.md
