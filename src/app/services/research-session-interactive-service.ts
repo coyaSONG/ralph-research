@@ -261,18 +261,28 @@ function createSessionHandle(input: {
   sessionManager: Pick<CodexCliSessionManager, "startSession" | "reattachSession">;
 }): CodexCliSessionHandle {
   if (input.sessionResolution?.decision === "reuse") {
-    return input.sessionManager.reattachSession({
-      sessionId: input.session.sessionId,
-      codexSessionId: input.sessionResolution.codexSessionReference.codexSessionId,
-    });
+    try {
+      return input.sessionManager.reattachSession({
+        sessionId: input.session.sessionId,
+        codexSessionId: input.sessionResolution.codexSessionReference.codexSessionId,
+      });
+    } catch {
+      const existingSessionId = getExistingCodexSessionId(input.session, input.sessionResolution);
+      return input.sessionManager.startSession({
+        cwd: input.session.workingDirectory,
+        sessionId: input.session.sessionId,
+        ...(existingSessionId ? { existingSessionId } : {}),
+        command: input.session.agent.command,
+        approvalPolicy: input.session.agent.approvalPolicy,
+        sandboxMode: input.session.agent.sandboxMode,
+        ...(input.session.agent.model ? { model: input.session.agent.model } : {}),
+        prompt: input.session.goal,
+        extraWritableDirectories: [input.repoRoot],
+      });
+    }
   }
 
-  const existingSessionId =
-    input.sessionResolution?.decision === "replace" &&
-    input.sessionResolution.replace.attachabilityMode === "resume"
-      ? input.sessionResolution.codexSessionReference?.codexSessionId ??
-        input.sessionResolution.lifecycle?.identity.codexSessionId
-      : undefined;
+  const existingSessionId = getExistingCodexSessionId(input.session, input.sessionResolution);
 
   return input.sessionManager.startSession({
     cwd: input.session.workingDirectory,
@@ -285,6 +295,49 @@ function createSessionHandle(input: {
     prompt: input.session.goal,
     extraWritableDirectories: [input.repoRoot],
   });
+}
+
+function getExistingCodexSessionId(
+  session: Pick<ResearchSessionRecord, "sessionId">,
+  sessionResolution: ResearchSessionOrchestratorStepResult["cycle"]["sessionResolution"] | undefined,
+): string | undefined {
+  if (!sessionResolution) {
+    return undefined;
+  }
+
+  const normalizedResearchSessionId = session.sessionId.trim();
+  if (sessionResolution.decision === "reuse") {
+    return normalizeExternalCodexSessionId(
+      normalizedResearchSessionId,
+      sessionResolution.codexSessionReference.codexSessionId,
+    );
+  }
+
+  if (sessionResolution.replace.attachabilityMode !== "resume") {
+    return undefined;
+  }
+
+  return normalizeExternalCodexSessionId(
+    normalizedResearchSessionId,
+    sessionResolution.codexSessionReference?.codexSessionId ??
+      sessionResolution.lifecycle?.identity.codexSessionId,
+  );
+}
+
+function normalizeExternalCodexSessionId(
+  researchSessionId: string,
+  codexSessionId: string | undefined,
+): string | undefined {
+  if (codexSessionId === undefined) {
+    return undefined;
+  }
+
+  const normalizedCodexSessionId = codexSessionId.trim();
+  if (!normalizedCodexSessionId || normalizedCodexSessionId === researchSessionId) {
+    return undefined;
+  }
+
+  return normalizedCodexSessionId;
 }
 
 function getHandleCodexSessionId(handle: CodexCliSessionHandle): string | undefined {

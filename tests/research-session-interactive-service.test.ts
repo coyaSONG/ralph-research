@@ -595,6 +595,236 @@ describe("ResearchSessionInteractiveService", () => {
     expect(result.finalized.step).toBe("session_interrupted");
   });
 
+  it("falls back to a fresh Codex session when a reusable attachment cannot be reattached from a new process", async () => {
+    const canonicalRepoRoot = await realpath(tempRoot);
+    const startSession = vi.fn(() => ({
+      pid: 144,
+      command: "codex",
+      args: ["continue"],
+      metadata: {
+        launchMode: "new",
+        researchSessionId: "session-live-001",
+      },
+      waitForExit: async () => ({
+        code: 0,
+        signal: null,
+      }),
+      stop: async () => ({
+        code: null,
+        signal: "SIGTERM" as const,
+      }),
+    }));
+    const reattachSession = vi.fn(() => {
+      throw new Error("Active Codex CLI session not found for session-live-001");
+    });
+    const recordCodexSessionLifecycle = vi.fn(async () => ({
+      sessionId: "session-live-001",
+      phase: "running",
+    })) as never;
+    const recordInterruption = vi.fn(async () => ({
+      step: "session_interrupted",
+      session: {
+        sessionId: "session-live-001",
+        status: "awaiting_resume",
+        progress: {
+          completedCycles: 2,
+          nextCycle: 3,
+          latestFrontierIds: [],
+          repeatedFailureStreak: 0,
+          noMeaningfulProgressStreak: 0,
+          insufficientEvidenceStreak: 0,
+        },
+        resume: {
+          resumable: true,
+          checkpointType: "completed_cycle_boundary",
+          resumeFromCycle: 3,
+          requiresUserConfirmation: true,
+        },
+      },
+      cycle: {
+        completedCycles: 2,
+        nextCycle: 3,
+        latestFrontierIds: [],
+      },
+    })) as never;
+    const service = new ResearchSessionInteractiveService({
+      createOrchestrator: () =>
+        ({
+          continueSession: async () => ({
+            step: "session_resumed",
+            session: {
+              sessionId: "session-live-001",
+              goal: "improve future holdout top-3 accuracy",
+              workingDirectory: tempRoot,
+              status: "running",
+              agent: {
+                type: "codex_cli",
+                command: "codex",
+                approvalPolicy: "never",
+                sandboxMode: "workspace-write",
+                ttySession: {
+                  startupTimeoutSec: 30,
+                  turnTimeoutSec: 900,
+                },
+              },
+              context: {
+                trackableGlobs: ["**/*.ts"],
+                webSearch: true,
+                shellCommandAllowlistAdditions: [],
+                shellCommandAllowlistRemovals: [],
+              },
+              workspace: {
+                strategy: "git_worktree",
+                promoted: false,
+              },
+              stopPolicy: {
+                repeatedFailures: 3,
+                noMeaningfulProgress: 5,
+                insufficientEvidence: 3,
+              },
+              progress: {
+                completedCycles: 2,
+                nextCycle: 3,
+                latestFrontierIds: [],
+                repeatedFailureStreak: 0,
+                noMeaningfulProgressStreak: 0,
+                insufficientEvidenceStreak: 0,
+              },
+              stopCondition: {
+                type: "none",
+              },
+              resume: {
+                resumable: true,
+                checkpointType: "completed_cycle_boundary",
+                resumeFromCycle: 3,
+                requiresUserConfirmation: false,
+              },
+              createdAt: "2026-04-12T00:00:00.000Z",
+              updatedAt: "2026-04-12T00:12:00.000Z",
+            },
+            cycle: {
+              completedCycles: 2,
+              nextCycle: 3,
+              latestFrontierIds: [],
+              sessionResolution: {
+                decision: "reuse",
+                session: {
+                  sessionId: "session-live-001",
+                },
+                lifecycle: {
+                  sessionId: "session-live-001",
+                  workingDirectory: tempRoot,
+                  goal: "improve future holdout top-3 accuracy",
+                  resumeFromCycle: 3,
+                  completedCycles: 2,
+                  command: "codex",
+                  args: ["continue"],
+                  approvalPolicy: "never",
+                  sandboxMode: "workspace-write",
+                  startedAt: "2026-04-12T00:00:00.000Z",
+                  updatedAt: "2026-04-12T00:12:00.000Z",
+                  phase: "running",
+                  pid: 3131,
+                  identity: {
+                    researchSessionId: "session-live-001",
+                    codexSessionId: "session-live-001",
+                    agent: "codex_cli",
+                  },
+                  tty: {
+                    stdinIsTty: true,
+                    stdoutIsTty: true,
+                    startupTimeoutSec: 30,
+                    turnTimeoutSec: 900,
+                  },
+                  attachmentState: {
+                    mode: "working_directory",
+                    status: "bound",
+                    workingDirectory: tempRoot,
+                    trackedGlobs: ["**/*.ts"],
+                    attachedPaths: [],
+                    extraWritableDirectories: [tempRoot],
+                  },
+                  references: {
+                    checkpointRunId: "run-002",
+                    checkpointDecisionId: "decision-002",
+                  },
+                },
+                recovery: {
+                  classification: "inspect_only",
+                  resumeAllowed: false,
+                  reason: "Codex CLI session is still live and bound to the persisted working-directory attachment",
+                  runtime: {
+                    state: "active",
+                    processAlive: true,
+                    stale: false,
+                    pid: 3131,
+                    phase: "running",
+                  },
+                },
+                codexSessionReference: {
+                  codexSessionId: "session-live-001",
+                  lifecyclePath: join(tempRoot, ".ralph", "sessions", "session-live-001", "codex-session.json"),
+                },
+                reason: "Codex CLI session is still live and bound to the persisted working-directory attachment",
+                reuse: {
+                  researchSessionId: "session-live-001",
+                  codexSessionId: "session-live-001",
+                  pid: 3131,
+                  phase: "running",
+                  command: "codex",
+                  args: ["continue"],
+                  workingDirectory: tempRoot,
+                  attachmentStatus: "bound",
+                  trackedGlobs: ["**/*.ts"],
+                  extraWritableDirectories: [tempRoot],
+                  tty: {
+                    stdinIsTty: true,
+                    stdoutIsTty: true,
+                    startupTimeoutSec: 30,
+                    turnTimeoutSec: 900,
+                  },
+                  checkpointRunId: "run-002",
+                  checkpointDecisionId: "decision-002",
+                },
+              },
+            },
+          }),
+          recordCodexSessionLifecycle,
+          recordInterruption,
+          failSession: vi.fn(),
+        }) as never,
+      createSessionManager: () =>
+        ({
+          startSession,
+          reattachSession,
+        }) as never,
+    });
+
+    const result = await service.continueSession({
+      repoRoot: tempRoot,
+      sessionId: "session-live-001",
+    });
+
+    expect(reattachSession).toHaveBeenCalledWith({
+      sessionId: "session-live-001",
+      codexSessionId: "session-live-001",
+    });
+    expect(startSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: tempRoot,
+        sessionId: "session-live-001",
+        command: "codex",
+        approvalPolicy: "never",
+        sandboxMode: "workspace-write",
+        prompt: "improve future holdout top-3 accuracy",
+        extraWritableDirectories: [canonicalRepoRoot],
+      }),
+    );
+    expect(startSession.mock.calls[0]?.[0]).not.toHaveProperty("existingSessionId");
+    expect(result.resumed.step).toBe("session_resumed");
+    expect(result.finalized.step).toBe("session_interrupted");
+  });
+
   it("persists replacement detach and attach lifecycle transitions before waiting on the new Codex tty session", async () => {
     const startSession = vi.fn(() => ({
       pid: 123,
@@ -788,9 +1018,9 @@ describe("ResearchSessionInteractiveService", () => {
     expect(startSession).toHaveBeenCalledWith(
       expect.objectContaining({
         sessionId: "session-replace-001",
-        existingSessionId: "session-replace-001",
       }),
     );
+    expect(startSession.mock.calls[0]?.[0]).not.toHaveProperty("existingSessionId");
     expect(recordCodexSessionLifecycle).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
