@@ -7,18 +7,18 @@ import type { FrontierStore } from "../ports/frontier-store.js";
 import type { RunStore } from "../ports/run-store.js";
 import type {
   CommandMetricExtractorConfig,
-  CommandProposerConfig,
   JudgePack,
   LeafProposerConfig,
   LlmJudgeMetricExtractorConfig,
   RalphManifest,
 } from "../manifest/schema.js";
 import type { ConstraintEvaluation } from "../state/constraint-engine.js";
+import type { CodexCliCycleSessionContext } from "../model/codex-cli-cycle-session.js";
 import type { DecisionRecord } from "../model/decision-record.js";
 import type { FrontierEntry } from "../model/frontier-entry.js";
 import { summarizeMetricDiagnostics } from "../model/metric-diagnostics.js";
 import type { MetricResult } from "../model/metric.js";
-import type { RunRecord } from "../model/run-record.js";
+import type { ProposalAdapterMetadata, RunRecord } from "../model/run-record.js";
 import { evaluateAnchorAgreement, applyAnchorAgreementGate, loadAnchorRecords, type AnchorCheckResult } from "./anchor-checker.js";
 import { sampleAuditQueue, type AuditQueueItem } from "./audit-sampler.js";
 import { evaluateChangeBudget, type ChangeBudgetDecision } from "./change-budget.js";
@@ -31,7 +31,7 @@ import { GitWorktreeWorkspaceManager } from "./workspace-manager.js";
 import { extractCommandMetric } from "../../adapters/extractor/command-extractor.js";
 import { GitClient } from "../../adapters/git/git-client.js";
 import type { JudgeProvider } from "../../adapters/judge/llm-judge-provider.js";
-import { runCommandProposer } from "../../adapters/proposer/command-proposer.js";
+import { createProposerRunner } from "../../adapters/proposer/proposer-factory.js";
 import { evaluateConstraints } from "../state/constraint-engine.js";
 import {
   attachCommitShaToFrontierEntries,
@@ -50,6 +50,7 @@ export interface CycleRunnerDependencies {
   gitClient: GitClient;
   judgeProvider?: JudgeProvider;
   now?: () => Date;
+  createProposerRunner?: typeof createProposerRunner;
 }
 
 export interface RunCycleInput {
@@ -58,6 +59,7 @@ export interface RunCycleInput {
   manifest: RalphManifest;
   resolvedBaselineRef: string;
   currentFrontier: FrontierEntry[];
+  codexSession?: CodexCliCycleSessionContext;
   resumeRun?: RunRecord;
 }
 
@@ -92,6 +94,7 @@ interface CandidateAttemptResult {
   proposerType: string;
   operators: string[];
   summary: string;
+  adapterMetadata?: ProposalAdapterMetadata;
   proposeStdoutPath: string;
   runStdoutPath: string;
   metrics: Record<string, MetricResult>;
@@ -147,6 +150,7 @@ export async function runCycle(
       currentFrontier: frontier,
       baseCandidateId: context.candidateId,
       referenceMetric,
+      ...(dependencies.createProposerRunner ? { createProposerRunner: dependencies.createProposerRunner } : {}),
       ...(proposerHistory ? { historyContext: proposerHistory } : {}),
       ...(dependencies.judgeProvider ? { judgeProvider: dependencies.judgeProvider } : {}),
     });
@@ -160,6 +164,7 @@ export async function runCycle(
         proposerType: input.manifest.proposer.type,
         summary: selectedCandidate.summary,
         operators: selectedCandidate.operators,
+        ...(selectedCandidate.adapterMetadata ? { adapterMetadata: selectedCandidate.adapterMetadata } : {}),
       },
       logs: {
         ...runRecord.logs,
@@ -346,6 +351,11 @@ async function runCommandCycle(
   input: RunCycleInput,
   dependencies: CycleRunnerDependencies,
 ): Promise<CycleRunResult> {
+  if (input.manifest.proposer.type === "parallel") {
+    throw new Error("parallel proposers must be routed through the parallel cycle runner");
+  }
+
+  const proposer = input.manifest.proposer;
   const now = dependencies.now ?? (() => new Date());
   const manifestDir = dirname(input.manifestPath);
   const referenceMetric = getReferenceMetric(input.manifest);
@@ -391,9 +401,11 @@ async function runCommandCycle(
           const workspacePath = runRecord.workspacePath
             ?? (await dependencies.workspaceManager.createWorkspace(runRecord.candidateId, input.resolvedBaselineRef)).workspacePath;
           const proposal = await executeProposal(
-            input.manifest.proposer as CommandProposerConfig,
+            proposer,
             workspacePath,
+            dependencies.createProposerRunner,
             proposerHistory,
+            input.codexSession,
           );
           const proposeStdoutPath = await persistText(
             join(context.runDir, "logs", `${runRecord.candidateId}.propose.stdout.log`),
@@ -406,9 +418,10 @@ async function runCommandCycle(
               workspacePath,
               proposal: {
                 ...runRecord.proposal,
-                proposerType: input.manifest.proposer.type,
+                proposerType: proposer.type,
                 summary: proposerHistory ? `${proposal.summary}; history_context=enabled` : proposal.summary,
                 operators: [],
+                ...(proposal.adapterMetadata ? { adapterMetadata: proposal.adapterMetadata } : {}),
               },
               logs: {
                 ...runRecord.logs,
@@ -1058,11 +1071,17 @@ async function executeCandidateStrategy(input: {
   runDir: string;
   workspaceManager: GitWorktreeWorkspaceManager;
   currentFrontier: FrontierEntry[];
+  createProposerRunner?: typeof createProposerRunner;
   judgeProvider?: JudgeProvider;
   historyContext?: { summary: string; path: string };
 }): Promise<CandidateAttemptResult> {
   const workspace = await input.workspaceManager.createWorkspace(input.candidateId, input.resolvedBaselineRef);
-  const proposal = await executeProposal(input.proposer, workspace.workspacePath, input.historyContext);
+  const proposal = await executeProposal(
+    input.proposer,
+    workspace.workspacePath,
+    input.createProposerRunner,
+    input.historyContext,
+  );
   const proposeStdoutPath = await persistText(
     join(input.runDir, "logs", `${input.candidateId}.propose.stdout.log`),
     proposal.stdout,
@@ -1103,6 +1122,7 @@ async function executeCandidateStrategy(input: {
     proposerType: input.proposer.type,
     operators: input.proposer.type === "operator_llm" ? input.proposer.operators : [],
     summary: input.historyContext ? `${proposal.summary}; history_context=enabled` : proposal.summary,
+    ...(proposal.adapterMetadata ? { adapterMetadata: proposal.adapterMetadata } : {}),
     proposeStdoutPath,
     runStdoutPath,
     metrics: metricEvaluation.metrics,
@@ -1117,14 +1137,13 @@ async function executeCandidateStrategy(input: {
 async function executeProposal(
   proposer: LeafProposerConfig,
   workspacePath: string,
+  buildProposerRunner: typeof createProposerRunner | undefined,
   historyContext?: { summary: string; path: string },
+  codexSession?: CodexCliCycleSessionContext,
 ) {
-  if (proposer.type !== "command") {
-    throw new Error(`unsupported proposer type ${proposer.type} in cycle runner`);
-  }
-
-  return runCommandProposer(proposer as CommandProposerConfig, {
+  return (buildProposerRunner ?? createProposerRunner)(proposer).run({
     workspacePath,
+    ...(codexSession ? { codexSession } : {}),
     ...(historyContext
       ? {
           env: {

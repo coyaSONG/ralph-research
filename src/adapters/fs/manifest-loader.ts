@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import { parse } from "yaml";
 import { ZodError } from "zod";
 
-import { compileManifestAdmission } from "../../core/manifest/admission.js";
+import { compileManifestAdmission, compileRawManifestAdmission } from "../../core/manifest/admission.js";
 import { DEFAULT_MANIFEST_FILENAME, RalphManifestSchema, type RalphManifest } from "../../core/manifest/schema.js";
 
 export interface LoadedManifest {
@@ -48,6 +48,14 @@ export async function loadManifestFromFile(
   }
 
   try {
+    const rawAdmissionIssues = compileRawManifestAdmission(parsedYaml);
+    if (rawAdmissionIssues.length > 0) {
+      throw new ManifestLoadError(`Manifest admission failed for ${resolvedPath}`, {
+        executable: false,
+        issues: rawAdmissionIssues,
+      });
+    }
+
     const manifest = RalphManifestSchema.parse(parsedYaml);
     const admission = await compileManifestAdmission(manifest, options);
 

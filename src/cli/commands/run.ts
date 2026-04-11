@@ -84,7 +84,10 @@ export async function runRunCommand(
   }
 }
 
-export function registerRunCommand(program: Command): void {
+export function registerRunCommand(
+  program: Command,
+  executeRunCommand: typeof runRunCommand = runRunCommand,
+): void {
   program
     .command("run")
     .description("Run one or more research cycles or keep iterating until a stop condition is met.")
@@ -95,7 +98,7 @@ export function registerRunCommand(program: Command): void {
     .option("--fresh", "Start a fresh run instead of auto-resuming the latest recoverable run", false)
     .option("--json", "Emit machine-readable output", false)
     .action(async (options: RunCommandOptions) => {
-      const exitCode = await runRunCommand(options);
+      const exitCode = await executeRunCommand(options);
       if (exitCode !== 0) {
         process.exitCode = exitCode;
       }

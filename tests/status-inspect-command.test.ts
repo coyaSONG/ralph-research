@@ -86,6 +86,36 @@ describe("status and inspect recovery output", () => {
     });
     expect(payload.recovery.reason).toContain("commit sha");
   });
+
+  it("shows codex_cli proposer invocation metadata in status output", async () => {
+    const repoRoot = join(tempRoot, "repo-status-codex-cli");
+    await initNumericFixtureRepo(repoRoot);
+    await seedCodexCliRun(repoRoot);
+    process.chdir(repoRoot);
+
+    const io = createCapturingIo();
+    const exitCode = await runStatusCommand({}, io);
+
+    expect(exitCode).toBe(0);
+    expect(io.stdoutText()).toContain("latest proposer: codex_cli");
+    expect(io.stdoutText()).toContain("latest proposer invocation: session session-001 via codex -C /tmp/workspace -a never -s workspace-write --search");
+    expect(io.stdoutText()).toContain("latest proposer outcome: terminal_exit code=0 signal=none duration=1200ms");
+  });
+
+  it("shows codex_cli proposer invocation metadata in inspect output", async () => {
+    const repoRoot = join(tempRoot, "repo-inspect-codex-cli");
+    await initNumericFixtureRepo(repoRoot);
+    await seedCodexCliRun(repoRoot);
+    process.chdir(repoRoot);
+
+    const io = createCapturingIo();
+    const exitCode = await runInspectCommand("run-0001", {}, io);
+
+    expect(exitCode).toBe(0);
+    expect(io.stdoutText()).toContain("proposer: codex_cli");
+    expect(io.stdoutText()).toContain("proposer invocation: session session-001 via codex -C /tmp/workspace -a never -s workspace-write --search");
+    expect(io.stdoutText()).toContain("proposer outcome: terminal_exit code=0 signal=none duration=1200ms");
+  });
 });
 
 async function seedProposedRun(repoRoot: string): Promise<void> {
@@ -125,6 +155,39 @@ async function seedCommittedRun(repoRoot: string): Promise<void> {
       phase: "committed",
       pendingAction: "update_frontier",
       decisionId: "decision-run-0001",
+    }),
+  );
+}
+
+async function seedCodexCliRun(repoRoot: string): Promise<void> {
+  const runStore = new JsonFileRunStore(join(repoRoot, ".ralph", "runs"));
+  await runStore.put(
+    makeRunRecord({
+      status: "rejected",
+      phase: "completed",
+      pendingAction: "none",
+      endedAt: "2026-04-12T00:20:00.000Z",
+      proposal: {
+        proposerType: "codex_cli",
+        summary: "codex_cli session session-001 completed with exit code 0 in 1200ms",
+        operators: [],
+        adapterMetadata: {
+          adapter: "codex_cli",
+          invocation: {
+            sessionId: "session-001",
+            command: "codex",
+            args: ["-C", "/tmp/workspace", "-a", "never", "-s", "workspace-write", "--search"],
+            cwd: "/tmp/workspace",
+          },
+          outcome: {
+            kind: "terminal_exit",
+            code: 0,
+            signal: null,
+            durationMs: 1200,
+            summary: "codex_cli session session-001 completed with exit code 0 in 1200ms",
+          },
+        },
+      },
     }),
   );
 }

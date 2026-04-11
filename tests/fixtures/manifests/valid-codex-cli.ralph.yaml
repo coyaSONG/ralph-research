@@ -1,0 +1,26 @@
+schemaVersion: "0.1"
+project:
+  name: codex-cli-demo
+  artifact: code
+proposer:
+  type: codex_cli
+  ttySession: {}
+experiment:
+  run:
+    command: ./scripts/run.sh
+metrics:
+  catalog:
+    - id: quality
+      kind: numeric
+      direction: maximize
+      extractor:
+        type: command
+        command: ./scripts/metric.sh
+        parser: plain_number
+frontier:
+  strategy: single_best
+  primaryMetric: quality
+ratchet:
+  type: epsilon_improve
+  metric: quality
+  epsilon: 0

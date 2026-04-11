@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 
 import { RunNotFoundError, inspectRun } from "../../app/services/project-state-service.js";
+import { formatProposalDisplayLines } from "./proposer-display.js";
 import type { CommandIO } from "./run.js";
 
 export interface InspectCommandOptions {
@@ -36,6 +37,7 @@ export async function runInspectCommand(
       io.stdout(
         [
           `run: ${result.run.runId} (${result.run.status})`,
+          ...formatProposalDisplayLines(result.run.proposal, "proposer"),
           `recovery: ${result.recovery.classification} (${result.recovery.nextAction})`,
           `decision: ${result.decision?.outcome ?? "n/a"}`,
           `reason: ${result.explainability.decisionReason ?? "n/a"}`,

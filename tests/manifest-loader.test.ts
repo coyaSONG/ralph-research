@@ -23,6 +23,10 @@ describe("loadManifestFromFile", () => {
     expect(loaded.manifest.scope.maxFilesChanged).toBe(5);
     expect(loaded.manifest.scope.maxLineDelta).toBe(200);
     expect(loaded.manifest.storage.root).toBe(".ralph");
+    expect(loaded.manifest.storage.researchSession).toEqual({
+      sessionsDir: "sessions",
+      projectDefaultsFile: "project-defaults.json",
+    });
     expect(loaded.manifest.judgePacks[0]?.lowConfidenceThreshold).toBe(0.75);
     expect(loaded.manifest.judgePacks[0]?.anchors?.minAgreementWithHuman).toBe(0.8);
   });
@@ -176,6 +180,48 @@ describe("loadManifestFromFile", () => {
           expect.objectContaining({
             code: "unsupported_capability",
             path: ["proposer", "type"],
+          }),
+        ],
+      },
+    });
+  });
+
+  it("rejects codex_cli fixtures that omit ttySession with admission details", async () => {
+    await expect(loadManifestFromFile(new URL("invalid-codex-cli-missing-tty-session.ralph.yaml", fixturesDir).pathname)).rejects.toMatchObject({
+      name: "ManifestLoadError",
+      causeValue: {
+        executable: false,
+        issues: [
+          expect.objectContaining({
+            code: "unsupported_capability",
+            path: ["proposer", "ttySession"],
+          }),
+        ],
+      },
+    });
+  });
+
+  it("rejects codex_cli fixtures that mix command-only proposer fields with admission details", async () => {
+    await expect(loadManifestFromFile(new URL("invalid-codex-cli-command-only-fields.ralph.yaml", fixturesDir).pathname)).rejects.toMatchObject({
+      name: "ManifestLoadError",
+      causeValue: {
+        executable: false,
+        issues: [
+          expect.objectContaining({
+            code: "unsupported_capability",
+            path: ["proposer", "command"],
+          }),
+          expect.objectContaining({
+            code: "unsupported_capability",
+            path: ["proposer", "cwd"],
+          }),
+          expect.objectContaining({
+            code: "unsupported_capability",
+            path: ["proposer", "env"],
+          }),
+          expect.objectContaining({
+            code: "unsupported_capability",
+            path: ["proposer", "timeoutSec"],
           }),
         ],
       },

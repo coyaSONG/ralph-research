@@ -2,6 +2,36 @@ import { z } from "zod";
 
 import { metricResultSchema } from "./metric.js";
 
+const codexCliProposerInvocationSchema = z.object({
+  sessionId: z.string().min(1),
+  command: z.string().min(1),
+  args: z.array(z.string()).default([]),
+  cwd: z.string().min(1),
+  sessionMetadata: z
+    .object({
+      launchMode: z.enum(["new", "resume"]),
+      researchSessionId: z.string().min(1),
+      codexSessionId: z.string().min(1).optional(),
+    })
+    .optional(),
+});
+
+const codexCliProposerOutcomeSchema = z.object({
+  kind: z.literal("terminal_exit"),
+  code: z.number().int().nullable(),
+  signal: z.string().nullable(),
+  durationMs: z.number().int().nonnegative(),
+  summary: z.string().min(1),
+});
+
+const proposalAdapterMetadataSchema = z.discriminatedUnion("adapter", [
+  z.object({
+    adapter: z.literal("codex_cli"),
+    invocation: codexCliProposerInvocationSchema,
+    outcome: codexCliProposerOutcomeSchema,
+  }),
+]);
+
 export const runPhaseSchema = z.enum([
   "started",
   "proposed",
@@ -53,6 +83,7 @@ export const runRecordSchema = z
       proposerType: z.string().min(1),
       summary: z.string().min(1),
       operators: z.array(z.string().min(1)).default([]),
+      adapterMetadata: proposalAdapterMetadataSchema.optional(),
       patchPath: z.string().min(1).optional(),
       diffLines: z.number().int().nonnegative().optional(),
       filesChanged: z.number().int().nonnegative().optional(),
@@ -121,3 +152,4 @@ export type RunRecord = z.infer<typeof runRecordSchema>;
 export type RunPhase = z.infer<typeof runPhaseSchema>;
 export type RunStatus = z.infer<typeof runStatusSchema>;
 export type PendingAction = z.infer<typeof pendingActionSchema>;
+export type ProposalAdapterMetadata = z.infer<typeof proposalAdapterMetadataSchema>;

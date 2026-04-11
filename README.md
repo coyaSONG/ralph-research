@@ -41,6 +41,8 @@ The current product bar is reliability, not breadth. The bundled success path is
 | Check whether a repo is runnable | `rrx validate` then `rrx doctor` |
 | Materialize the bundled example project | `rrx init --template writing` |
 | Run a disposable end-to-end demo | `rrx demo writing` |
+| Launch the v1 goal-driven orchestrator | `rrx "improve the holdout top-3 model"` |
+| Launch the v1 goal-driven orchestrator explicitly | `rrx launch "improve the holdout top-3 model"` |
 | Execute one cycle | `rrx run --json` |
 | Resume the latest recoverable run | `rrx run` |
 | Force a fresh run id | `rrx run --fresh` |
@@ -70,6 +72,8 @@ npx ralph-research inspect run-0001 --json
 ```
 
 This is the current truth contract for the bundled template: `init -> run -> inspect` should succeed quickly on a local machine.
+
+`rrx "goal"` now creates or refreshes the launch draft session and drops into the v1 TUI shell. Initial launch does not start an autonomous research cycle until the shell tells it to continue.
 
 ## Runtime Model
 
@@ -137,6 +141,8 @@ npx ralph-research run --until-target --until-no-improve 3 --json
 ## CLI
 
 ```text
+rrx "improve the holdout top-3 model"
+rrx launch "improve the holdout top-3 model"
 rrx validate
 rrx doctor
 rrx init --template writing

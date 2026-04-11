@@ -9,6 +9,7 @@ import { GitClient } from "../../adapters/git/git-client.js";
 import { acquireLock, releaseLock, renewLock } from "../../adapters/fs/lockfile.js";
 import { loadManifestFromFile } from "../../adapters/fs/manifest-loader.js";
 import type { JudgeProvider } from "../../adapters/judge/llm-judge-provider.js";
+import type { CodexCliCycleSessionContext } from "../../core/model/codex-cli-cycle-session.js";
 import { DEFAULT_MANIFEST_FILENAME, type CommandSpecConfig, type RalphManifest } from "../../core/manifest/schema.js";
 import { DEFAULT_STORAGE_ROOT } from "../../core/manifest/defaults.js";
 import { materializeFrontier } from "../../core/state/frontier-materializer.js";
@@ -20,6 +21,7 @@ export interface RunCycleServiceInput {
   repoRoot: string;
   manifestPath?: string;
   fresh?: boolean;
+  codexSession?: CodexCliCycleSessionContext;
 }
 
 export interface RunCycleServiceResult {
@@ -98,6 +100,7 @@ export class RunCycleService {
               manifest: loadedManifest.manifest,
               resolvedBaselineRef: loadedManifest.resolvedBaselineRef,
               currentFrontier: frontier,
+              ...(input.codexSession ? { codexSession: input.codexSession } : {}),
               resumeRun: latestRun,
             },
             {
@@ -139,6 +142,7 @@ export class RunCycleService {
           manifest: loadedManifest.manifest,
           resolvedBaselineRef: loadedManifest.resolvedBaselineRef,
           currentFrontier: frontier,
+          ...(input.codexSession ? { codexSession: input.codexSession } : {}),
         },
         {
           runStore,

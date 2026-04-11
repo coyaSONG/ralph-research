@@ -1,6 +1,7 @@
 import type { Command } from "commander";
 
 import { getProjectStatus, type ProjectStatus } from "../../app/services/project-state-service.js";
+import { formatProposalDisplayLines } from "./proposer-display.js";
 import type { CommandIO } from "./run.js";
 
 export interface StatusCommandOptions {
@@ -36,6 +37,9 @@ export async function runStatusCommand(
         `runtime: ${formatRuntimeSummary(status)}`,
         `recovery: ${status.recovery.classification} (${status.recovery.nextAction})`,
       ];
+      if (status.latestRun) {
+        lines.push(...formatProposalDisplayLines(status.latestRun.proposal, "latest proposer"));
+      }
       if (status.runtime.pid !== undefined) {
         lines.push(`pid: ${status.runtime.pid}`);
       }

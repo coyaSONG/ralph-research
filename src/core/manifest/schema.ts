@@ -3,6 +3,8 @@ import { z } from "zod";
 import {
   DEFAULT_ALLOWED_GLOBS,
   DEFAULT_COMMAND_TIMEOUT_SEC,
+  DEFAULT_CODEX_CLI_APPROVAL_POLICY,
+  DEFAULT_CODEX_CLI_SANDBOX_MODE,
   DEFAULT_LOW_CONFIDENCE_THRESHOLD,
   DEFAULT_MANIFEST_FILENAME,
   DEFAULT_MAX_FILES_CHANGED,
@@ -12,9 +14,13 @@ import {
   DEFAULT_PROPOSER_EXPLORATION_RATIO,
   DEFAULT_PROJECT_BASELINE_REF,
   DEFAULT_PROJECT_WORKSPACE,
+  DEFAULT_RESEARCH_PROJECT_DEFAULTS_FILE,
+  DEFAULT_RESEARCH_SESSIONS_DIR,
   DEFAULT_SCHEMA_VERSION,
   DEFAULT_STAGNATION_AFTER_REJECTIONS,
   DEFAULT_STORAGE_ROOT,
+  DEFAULT_TTY_SESSION_STARTUP_TIMEOUT_SEC,
+  DEFAULT_TTY_SESSION_TURN_TIMEOUT_SEC,
   manifestDefaults,
 } from "./defaults.js";
 
@@ -62,8 +68,23 @@ export const operatorLlmProposerSchema = z.object({
   history: proposerHistorySchema.default(manifestDefaults.proposer.history),
 });
 
+export const codexCliTtySessionSchema = z.strictObject({
+  startupTimeoutSec: z.number().int().positive().default(DEFAULT_TTY_SESSION_STARTUP_TIMEOUT_SEC),
+  turnTimeoutSec: z.number().int().positive().default(DEFAULT_TTY_SESSION_TURN_TIMEOUT_SEC),
+});
+
+export const codexCliProposerSchema = z.strictObject({
+  type: z.literal("codex_cli"),
+  approvalPolicy: z.enum(["never", "on-failure", "on-request", "untrusted"]).default(DEFAULT_CODEX_CLI_APPROVAL_POLICY),
+  sandboxMode: z.enum(["read-only", "workspace-write", "danger-full-access"]).default(DEFAULT_CODEX_CLI_SANDBOX_MODE),
+  model: z.string().min(1).optional(),
+  ttySession: codexCliTtySessionSchema,
+  history: proposerHistorySchema.default(manifestDefaults.proposer.history),
+});
+
 const leafProposerSchema = z.discriminatedUnion("type", [
   commandProposerSchema,
+  codexCliProposerSchema,
   operatorLlmProposerSchema,
 ]);
 
@@ -76,6 +97,7 @@ export const parallelProposerSchema = z.object({
 
 export const proposerSchema = z.discriminatedUnion("type", [
   commandProposerSchema,
+  codexCliProposerSchema,
   operatorLlmProposerSchema,
   parallelProposerSchema,
 ]);
@@ -235,6 +257,12 @@ export const stoppingSchema = z.object({
 
 export const storageSchema = z.object({
   root: z.string().min(1).default(DEFAULT_STORAGE_ROOT),
+  researchSession: z
+    .object({
+      sessionsDir: z.string().min(1).default(DEFAULT_RESEARCH_SESSIONS_DIR),
+      projectDefaultsFile: z.string().min(1).default(DEFAULT_RESEARCH_PROJECT_DEFAULTS_FILE),
+    })
+    .default(manifestDefaults.storage.researchSession),
 });
 
 const manifestShapeSchema = z.object({
@@ -341,6 +369,8 @@ export type RatchetConfig = z.infer<typeof ratchetSchema>;
 export type StoppingConfig = z.infer<typeof stoppingSchema>;
 export type StoppingTargetConfig = z.infer<typeof stoppingTargetSchema>;
 export type CommandProposerConfig = z.infer<typeof commandProposerSchema>;
+export type CodexCliProposerConfig = z.infer<typeof codexCliProposerSchema>;
+export type CodexCliTtySessionConfig = z.infer<typeof codexCliTtySessionSchema>;
 export type ParallelProposerConfig = z.infer<typeof parallelProposerSchema>;
 export type CommandMetricExtractorConfig = z.infer<typeof commandMetricExtractorSchema>;
 export type CommandSpecConfig = z.infer<typeof commandSpecSchema>;
@@ -349,5 +379,6 @@ export type LlmJudgeMetricExtractorConfig = z.infer<typeof llmJudgeMetricExtract
 export type ProposerHistoryConfig = z.infer<typeof proposerHistorySchema>;
 export type ParetoObjectiveConfig = z.infer<typeof paretoObjectiveSchema>;
 export type LeafProposerConfig = z.infer<typeof leafProposerSchema>;
+export type StorageConfig = z.infer<typeof storageSchema>;
 
 export { DEFAULT_MANIFEST_FILENAME };

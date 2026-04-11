@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -19,6 +19,7 @@ import { runRejectCommand } from "../src/cli/commands/reject.js";
 import { runRunCommand } from "../src/cli/commands/run.js";
 import { runStatusCommand } from "../src/cli/commands/status.js";
 import { runValidateCommand } from "../src/cli/commands/validate.js";
+import { researchSessionRecordSchema, type ResearchSessionRecord } from "../src/core/model/research-session.js";
 
 let tempRoot = "";
 let originalCwd = "";
@@ -250,6 +251,134 @@ describe("CLI commands", () => {
     expect(inspectPayload.run.status).toBe("accepted");
     expect(inspectPayload.decision.outcome).toBe("accepted");
     expect(inspectPayload.frontier[0]?.runId).toBe("run-0001");
+  });
+
+  it("keeps legacy run, decision, and frontier behavior authoritative even when resumable sessions exist", async () => {
+    const repoRoot = await initFixtureRepo("judge");
+    process.chdir(repoRoot);
+    const frontierStore = new JsonFileFrontierStore(join(repoRoot, ".ralph", "frontier.json"));
+
+    await frontierStore.save([
+      {
+        frontierId: "frontier-existing",
+        runId: "run-existing",
+        candidateId: "candidate-existing",
+        acceptedAt: "2026-03-29T00:00:00.000Z",
+        metrics: {
+          paper_quality: {
+            metricId: "paper_quality",
+            value: 0.5,
+            direction: "maximize",
+            confidence: 0.95,
+            details: {},
+          },
+        },
+        artifacts: [
+          {
+            id: "draft",
+            path: join(repoRoot, "docs", "draft.md"),
+          },
+        ],
+      },
+    ]);
+    await persistResearchSession(repoRoot, {
+      sessionId: "session-legacy-ignored",
+      status: "awaiting_resume",
+      stopCondition: {
+        type: "operator_stop",
+        note: "resume later",
+      },
+      progress: {
+        completedCycles: 2,
+        nextCycle: 3,
+        latestRunId: "run-session-002",
+        latestDecisionId: "decision-session-002",
+        latestFrontierIds: ["frontier-session-002"],
+        repeatedFailureStreak: 0,
+        noMeaningfulProgressStreak: 0,
+        insufficientEvidenceStreak: 0,
+        lastCheckpointAt: "2026-04-12T00:02:00.000Z",
+        lastSignals: {
+          cycle: 2,
+          outcome: "accepted",
+          changedFileCount: 1,
+          diffLineCount: 12,
+          repeatedDiff: false,
+          meaningfulProgress: true,
+          insufficientEvidence: false,
+          agentTieBreakerUsed: false,
+          newArtifacts: ["reports/holdout-cycle-2.json"],
+          reasons: ["Future holdout top-3 score improved."],
+        },
+      },
+      resume: {
+        resumable: true,
+        checkpointType: "completed_cycle_boundary",
+        resumeFromCycle: 3,
+        requiresUserConfirmation: true,
+        checkpointRunId: "run-session-002",
+        checkpointDecisionId: "decision-session-002",
+        interruptionDetectedAt: "2026-04-12T00:02:30.000Z",
+      },
+      updatedAt: "2026-04-12T00:02:00.000Z",
+    });
+
+    const service = new RunCycleService({
+      judgeProvider: createSequentialJudgeProvider([
+        pairwise("candidate", 0.2),
+        pairwise("candidate", 0.3),
+        pairwise("candidate", 0.4),
+        pairwise("incumbent", 0.3),
+        pairwise("incumbent", 0.4),
+      ]),
+    });
+    await service.run({ repoRoot });
+
+    const acceptIo = createCapturingIo();
+    const statusIo = createCapturingIo();
+    const frontierIo = createCapturingIo();
+    const inspectIo = createCapturingIo();
+
+    expect(
+      await runAcceptCommand(
+        "run-0001",
+        {
+          by: "reviewer",
+          note: "looks good",
+          json: true,
+        },
+        acceptIo,
+      ),
+    ).toBe(0);
+    expect(await runStatusCommand({ json: true }, statusIo)).toBe(0);
+    expect(await runFrontierCommand({ json: true }, frontierIo)).toBe(0);
+    expect(await runInspectCommand("run-0001", { json: true }, inspectIo)).toBe(0);
+
+    const runStore = new JsonFileRunStore(join(repoRoot, ".ralph", "runs"));
+    const decisionStore = new JsonFileDecisionStore(join(repoRoot, ".ralph", "decisions"));
+    const acceptedRun = await runStore.get("run-0001");
+    const acceptedDecision = await decisionStore.get("decision-run-0001");
+    const persistedFrontier = await frontierStore.load();
+    const persistedSessionPath = join(repoRoot, ".ralph", "sessions", "session-legacy-ignored", "session.json");
+    await expect(access(persistedSessionPath)).resolves.toBeUndefined();
+    const persistedSession = researchSessionRecordSchema.parse(
+      JSON.parse(await readFile(persistedSessionPath, "utf8")),
+    );
+    const statusPayload = JSON.parse(statusIo.stdoutText());
+    const frontierPayload = JSON.parse(frontierIo.stdoutText());
+    const inspectPayload = JSON.parse(inspectIo.stdoutText());
+
+    expect(acceptedRun?.status).toBe("accepted");
+    expect(acceptedDecision?.outcome).toBe("accepted");
+    expect(persistedFrontier).toHaveLength(1);
+    expect(persistedFrontier[0]?.runId).toBe("run-0001");
+    expect(statusPayload.latestRun.runId).toBe("run-0001");
+    expect(statusPayload.pendingHumanRuns).toHaveLength(0);
+    expect(frontierPayload.frontier.map((entry: { runId: string }) => entry.runId)).toEqual(["run-0001"]);
+    expect(inspectPayload.decision.decisionId).toBe("decision-run-0001");
+    expect(inspectPayload.frontier.map((entry: { runId: string }) => entry.runId)).toEqual(["run-0001"]);
+    expect(persistedSession.status).toBe("awaiting_resume");
+    expect(persistedSession.resume.checkpointRunId).toBe("run-session-002");
   });
 
   it("manually accepts a pareto-reviewed run without collapsing incumbent frontier entries", async () => {
@@ -1014,4 +1143,56 @@ async function pathExists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function persistResearchSession(
+  repoRoot: string,
+  overrides: Partial<ResearchSessionRecord> = {},
+): Promise<void> {
+  const sessionId = overrides.sessionId ?? "session-001";
+  const sessionPath = join(repoRoot, ".ralph", "sessions", sessionId, "session.json");
+  const record = researchSessionRecordSchema.parse({
+    sessionId,
+    goal: "Reach 70% future holdout top-3 prediction success.",
+    workingDirectory: repoRoot,
+    status: "running",
+    agent: {
+      type: "codex_cli",
+      command: "codex",
+    },
+    workspace: {
+      strategy: "git_worktree",
+      currentRef: `refs/heads/${sessionId}`,
+      currentPath: join(repoRoot, ".ralph", "sessions", sessionId, "worktree"),
+      promoted: false,
+    },
+    stopPolicy: {
+      repeatedFailures: 3,
+      noMeaningfulProgress: 5,
+      insufficientEvidence: 3,
+    },
+    progress: {
+      completedCycles: 0,
+      nextCycle: 1,
+      latestFrontierIds: [],
+      repeatedFailureStreak: 0,
+      noMeaningfulProgressStreak: 0,
+      insufficientEvidenceStreak: 0,
+    },
+    stopCondition: {
+      type: "none",
+    },
+    resume: {
+      resumable: true,
+      checkpointType: "completed_cycle_boundary",
+      resumeFromCycle: 1,
+      requiresUserConfirmation: false,
+    },
+    createdAt: "2026-04-12T00:00:00.000Z",
+    updatedAt: "2026-04-12T00:00:00.000Z",
+    ...overrides,
+  });
+
+  await mkdir(join(repoRoot, ".ralph", "sessions", sessionId), { recursive: true });
+  await writeFile(sessionPath, `${JSON.stringify(record, null, 2)}\n`, "utf8");
 }

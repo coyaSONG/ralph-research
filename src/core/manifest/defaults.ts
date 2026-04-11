@@ -15,6 +15,15 @@ export const DEFAULT_PROPOSER_EXPLORATION_RATIO = 0.3;
 export const DEFAULT_STAGNATION_AFTER_REJECTIONS = 3;
 export const DEFAULT_MAX_PATCH_COUNT = 1;
 export const DEFAULT_PROPOSER_HISTORY_MAX_RUNS = 5;
+export const DEFAULT_SESSION_REPEATED_FAILURE_LIMIT = 3;
+export const DEFAULT_SESSION_NO_PROGRESS_LIMIT = 5;
+export const DEFAULT_SESSION_INSUFFICIENT_EVIDENCE_LIMIT = 3;
+export const DEFAULT_CODEX_CLI_APPROVAL_POLICY = "never" as const;
+export const DEFAULT_CODEX_CLI_SANDBOX_MODE = "workspace-write" as const;
+export const DEFAULT_TTY_SESSION_STARTUP_TIMEOUT_SEC = 30;
+export const DEFAULT_TTY_SESSION_TURN_TIMEOUT_SEC = 900;
+export const DEFAULT_RESEARCH_SESSIONS_DIR = "sessions";
+export const DEFAULT_RESEARCH_PROJECT_DEFAULTS_FILE = "project-defaults.json";
 
 export const manifestDefaults = {
   schemaVersion: DEFAULT_SCHEMA_VERSION,
@@ -45,6 +54,14 @@ export const manifestDefaults = {
     explorationRatio: DEFAULT_PROPOSER_EXPLORATION_RATIO,
     stagnationAfterRejections: DEFAULT_STAGNATION_AFTER_REJECTIONS,
     maxPatchCount: DEFAULT_MAX_PATCH_COUNT,
+    codexCli: {
+      approvalPolicy: DEFAULT_CODEX_CLI_APPROVAL_POLICY,
+      sandboxMode: DEFAULT_CODEX_CLI_SANDBOX_MODE,
+      ttySession: {
+        startupTimeoutSec: DEFAULT_TTY_SESSION_STARTUP_TIMEOUT_SEC,
+        turnTimeoutSec: DEFAULT_TTY_SESSION_TURN_TIMEOUT_SEC,
+      },
+    },
     history: {
       enabled: false,
       maxRuns: DEFAULT_PROPOSER_HISTORY_MAX_RUNS,
@@ -52,5 +69,9 @@ export const manifestDefaults = {
   },
   storage: {
     root: DEFAULT_STORAGE_ROOT,
+    researchSession: {
+      sessionsDir: DEFAULT_RESEARCH_SESSIONS_DIR,
+      projectDefaultsFile: DEFAULT_RESEARCH_PROJECT_DEFAULTS_FILE,
+    },
   },
 } as const;
