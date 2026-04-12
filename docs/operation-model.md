@@ -60,6 +60,23 @@ The runtime currently classifies the latest persisted run into four states in [s
 
 ## Runtime and CLI Semantics
 
+### `rrx launch` and `rrx resume`
+
+The v1 goal-driven orchestrator is layered on top of the existing run-cycle engine.
+
+- `rrx launch "goal"` creates or refreshes the `launch-draft` session and opens the TUI shell
+- the draft session exists only to collect the reviewable execution contract
+- submitting the review step materializes a real research session and starts the selected agent runtime
+- once that interactive run returns to the CLI, the `launch-draft` snapshot is deleted
+
+This split is intentional. The draft is editable shell state; the persisted runtime session is the source of truth for inspection and resume.
+
+`rrx resume <sessionId>` is narrower than "restart whatever ran last". It only resumes sessions in a resumable status and only when the runtime has a completed cycle checkpoint.
+
+- interrupted sessions that ended after a completed cycle boundary are resumable
+- sessions that reached `goal_achieved` are terminal
+- sessions whose agent exited cleanly without an explicit completion checkpoint are terminal failures, not resumable interruptions
+
 ### `rrx run`
 
 `rrx run` delegates to the run loop service and uses the recovery classification of the latest run.

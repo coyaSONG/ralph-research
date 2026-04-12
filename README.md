@@ -43,6 +43,7 @@ The current product bar is reliability, not breadth. The bundled success path is
 | Run a disposable end-to-end demo | `rrx demo writing` |
 | Launch the v1 goal-driven orchestrator | `rrx "improve the holdout top-3 model"` |
 | Launch the v1 goal-driven orchestrator explicitly | `rrx launch "improve the holdout top-3 model"` |
+| Resume a persisted TUI research session | `rrx resume latest` |
 | Execute one cycle | `rrx run --json` |
 | Resume the latest recoverable run | `rrx run` |
 | Force a fresh run id | `rrx run --fresh` |
@@ -74,6 +75,14 @@ npx ralph-research inspect run-0001 --json
 This is the current truth contract for the bundled template: `init -> run -> inspect` should succeed quickly on a local machine.
 
 `rrx "goal"` now creates or refreshes the launch draft session and drops into the v1 TUI shell. Initial launch does not start an autonomous research cycle until the shell tells it to continue.
+
+When you submit the review step, the shell materializes a real research session and hands control to the selected agent runtime. Once that interactive run returns, `launch-draft` is removed. The remaining persisted session is the only runtime record you need to inspect or resume.
+
+Resume semantics are intentionally narrow:
+
+- `rrx resume <sessionId>` only works for sessions that ended after a completed cycle checkpoint
+- interrupted sessions are resumable because the runtime has durable evidence for the next cycle boundary
+- a clean agent exit without `goal_achieved` or a completed checkpoint is treated as terminal and is not resumable
 
 ## Runtime Model
 
@@ -143,6 +152,7 @@ npx ralph-research run --until-target --until-no-improve 3 --json
 ```text
 rrx "improve the holdout top-3 model"
 rrx launch "improve the holdout top-3 model"
+rrx resume latest
 rrx validate
 rrx doctor
 rrx init --template writing
