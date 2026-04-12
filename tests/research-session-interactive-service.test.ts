@@ -34,7 +34,7 @@ afterEach(async () => {
 });
 
 describe("ResearchSessionInteractiveService", () => {
-  it("persists a clean interactive exit as awaiting_resume with lifecycle evidence", async () => {
+  it("fails a clean interactive exit that did not explicitly complete the research session", async () => {
     const launchService = new ResearchSessionLaunchService({
       now: () => new Date("2026-04-12T00:00:00.000Z"),
     });
@@ -86,19 +86,22 @@ describe("ResearchSessionInteractiveService", () => {
         step: "session_started",
       },
       finalized: {
-        step: "session_interrupted",
+        step: "session_failed",
         session: {
-          status: "awaiting_resume",
-          resume: {
-            resumeFromCycle: 1,
-            requiresUserConfirmation: true,
-            interruptedDuringCycle: 1,
+          status: "failed",
+          stopCondition: {
+            type: "unrecoverable_error",
           },
         },
       },
     });
-    expect(result.finalized.session.resume.note).toContain("exited cleanly before cycle 1 completed");
-    expect(result.finalized.session.resume.note).toContain(result.lifecyclePath);
+    expect(result.finalized.session.stopCondition.type).toBe("unrecoverable_error");
+    if (result.finalized.session.stopCondition.type === "unrecoverable_error") {
+      expect(result.finalized.session.stopCondition.message).toContain(
+        "exited cleanly before explicitly completing the research session",
+      );
+      expect(result.finalized.session.stopCondition.message).toContain(result.lifecyclePath);
+    }
 
     const persistedSession = researchSessionRecordSchema.parse(
       JSON.parse(
@@ -108,7 +111,7 @@ describe("ResearchSessionInteractiveService", () => {
         ),
       ),
     );
-    expect(persistedSession.status).toBe("awaiting_resume");
+    expect(persistedSession.status).toBe("failed");
 
     const lifecycle = JSON.parse(
       await readFile(
@@ -316,8 +319,8 @@ describe("ResearchSessionInteractiveService", () => {
             command: "codex",
             args: [],
             waitForExit: async () => ({
-              code: 0,
-              signal: null,
+              code: null,
+              signal: "SIGINT" as const,
             }),
             stop: async () => ({
               code: null,
@@ -362,8 +365,8 @@ describe("ResearchSessionInteractiveService", () => {
     });
 
     expect(result.resumed.step).toBe("session_resumed");
-    expect(result.finalized.step).toBe("session_interrupted");
-    expect(result.finalized.session.status).toBe("awaiting_resume");
+    expect(result.finalized.step).toBe("session_failed");
+    expect(result.finalized.session.status).toBe("failed");
 
     const lifecycle = JSON.parse(
       await readFile(
@@ -420,6 +423,30 @@ describe("ResearchSessionInteractiveService", () => {
           checkpointType: "completed_cycle_boundary",
           resumeFromCycle: 3,
           requiresUserConfirmation: true,
+        },
+      },
+      cycle: {
+        completedCycles: 2,
+        nextCycle: 3,
+        latestFrontierIds: [],
+      },
+    })) as never;
+    const failSession = vi.fn(async () => ({
+      step: "session_failed",
+      session: {
+        sessionId: "session-live-001",
+        status: "failed",
+        progress: {
+          completedCycles: 2,
+          nextCycle: 3,
+          latestFrontierIds: [],
+          repeatedFailureStreak: 0,
+          noMeaningfulProgressStreak: 0,
+          insufficientEvidenceStreak: 0,
+        },
+        stopCondition: {
+          type: "unrecoverable_error",
+          message: "Codex CLI session exited cleanly before explicitly completing the research session.",
         },
       },
       cycle: {
@@ -572,7 +599,7 @@ describe("ResearchSessionInteractiveService", () => {
           }),
           recordCodexSessionLifecycle,
           recordInterruption,
-          failSession: vi.fn(),
+          failSession,
         }) as never,
       createSessionManager: () =>
         ({
@@ -592,7 +619,7 @@ describe("ResearchSessionInteractiveService", () => {
       codexSessionId: "session-live-001",
     });
     expect(result.resumed.step).toBe("session_resumed");
-    expect(result.finalized.step).toBe("session_interrupted");
+    expect(result.finalized.step).toBe("session_failed");
   });
 
   it("falls back to a fresh Codex session when a reusable attachment cannot be reattached from a new process", async () => {
@@ -639,6 +666,30 @@ describe("ResearchSessionInteractiveService", () => {
           checkpointType: "completed_cycle_boundary",
           resumeFromCycle: 3,
           requiresUserConfirmation: true,
+        },
+      },
+      cycle: {
+        completedCycles: 2,
+        nextCycle: 3,
+        latestFrontierIds: [],
+      },
+    })) as never;
+    const failSession = vi.fn(async () => ({
+      step: "session_failed",
+      session: {
+        sessionId: "session-live-001",
+        status: "failed",
+        progress: {
+          completedCycles: 2,
+          nextCycle: 3,
+          latestFrontierIds: [],
+          repeatedFailureStreak: 0,
+          noMeaningfulProgressStreak: 0,
+          insufficientEvidenceStreak: 0,
+        },
+        stopCondition: {
+          type: "unrecoverable_error",
+          message: "Codex CLI session exited cleanly before explicitly completing the research session.",
         },
       },
       cycle: {
@@ -791,7 +842,7 @@ describe("ResearchSessionInteractiveService", () => {
           }),
           recordCodexSessionLifecycle,
           recordInterruption,
-          failSession: vi.fn(),
+          failSession,
         }) as never,
       createSessionManager: () =>
         ({
@@ -822,7 +873,7 @@ describe("ResearchSessionInteractiveService", () => {
     );
     expect(startSession.mock.calls[0]?.[0]).not.toHaveProperty("existingSessionId");
     expect(result.resumed.step).toBe("session_resumed");
-    expect(result.finalized.step).toBe("session_interrupted");
+    expect(result.finalized.step).toBe("session_failed");
   });
 
   it("persists replacement detach and attach lifecycle transitions before waiting on the new Codex tty session", async () => {
@@ -1001,7 +1052,30 @@ describe("ResearchSessionInteractiveService", () => {
               latestFrontierIds: [],
             },
           })),
-          failSession: vi.fn(),
+          failSession: vi.fn(async () => ({
+            step: "session_failed",
+            session: {
+              sessionId: "session-replace-001",
+              status: "failed",
+              progress: {
+                completedCycles: 2,
+                nextCycle: 3,
+                latestFrontierIds: [],
+                repeatedFailureStreak: 0,
+                noMeaningfulProgressStreak: 0,
+                insufficientEvidenceStreak: 0,
+              },
+              stopCondition: {
+                type: "unrecoverable_error",
+                message: "Codex CLI session exited cleanly before explicitly completing the research session.",
+              },
+            },
+            cycle: {
+              completedCycles: 2,
+              nextCycle: 3,
+              latestFrontierIds: [],
+            },
+          })),
         }) as never,
       createSessionManager: () =>
         ({
@@ -1059,7 +1133,7 @@ describe("ResearchSessionInteractiveService", () => {
       }),
     );
     expect(result.resumed.step).toBe("session_resumed");
-    expect(result.finalized.step).toBe("session_interrupted");
+    expect(result.finalized.step).toBe("session_failed");
   });
 
   it("reuses a live persisted Codex session and preserves lifecycle evidence end to end", async () => {
@@ -1150,18 +1224,15 @@ describe("ResearchSessionInteractiveService", () => {
     );
     expect(persistedSession).toMatchObject({
       sessionId,
-      status: "awaiting_resume",
+      status: "failed",
       progress: {
         completedCycles: 2,
         nextCycle: 3,
         latestRunId: "run-002",
         latestDecisionId: "decision-002",
       },
-      resume: {
-        resumeFromCycle: 3,
-        checkpointRunId: "run-002",
-        checkpointDecisionId: "decision-002",
-        requiresUserConfirmation: true,
+      stopCondition: {
+        type: "unrecoverable_error",
       },
     });
 
@@ -1188,7 +1259,13 @@ describe("ResearchSessionInteractiveService", () => {
         signal: null,
       },
     });
-    expect(result.finalized.session.resume.note).toContain(".ralph/sessions/session-live-end-to-end/codex-session.json");
+    expect(result.finalized.step).toBe("session_failed");
+    expect(result.finalized.session.stopCondition.type).toBe("unrecoverable_error");
+    if (result.finalized.session.stopCondition.type === "unrecoverable_error") {
+      expect(result.finalized.session.stopCondition.message).toContain(
+        ".ralph/sessions/session-live-end-to-end/codex-session.json",
+      );
+    }
   });
 
   it("replaces a stale persisted Codex session and checkpoints detach-plus-restart lifecycle evidence end to end", async () => {
@@ -1282,18 +1359,15 @@ describe("ResearchSessionInteractiveService", () => {
     );
     expect(persistedSession).toMatchObject({
       sessionId,
-      status: "awaiting_resume",
+      status: "failed",
       progress: {
         completedCycles: 2,
         nextCycle: 3,
         latestRunId: "run-002",
         latestDecisionId: "decision-002",
       },
-      resume: {
-        resumeFromCycle: 3,
-        checkpointRunId: "run-002",
-        checkpointDecisionId: "decision-002",
-        requiresUserConfirmation: true,
+      stopCondition: {
+        type: "unrecoverable_error",
       },
     });
 
@@ -1320,7 +1394,13 @@ describe("ResearchSessionInteractiveService", () => {
         signal: null,
       },
     });
-    expect(result.finalized.session.resume.note).toContain(".ralph/sessions/session-stale-end-to-end/codex-session.json");
+    expect(result.finalized.step).toBe("session_failed");
+    expect(result.finalized.session.stopCondition.type).toBe("unrecoverable_error");
+    if (result.finalized.session.stopCondition.type === "unrecoverable_error") {
+      expect(result.finalized.session.stopCondition.message).toContain(
+        ".ralph/sessions/session-stale-end-to-end/codex-session.json",
+      );
+    }
   });
 
   it("starts a fresh Codex session when the persisted lifecycle bundle is missing", async () => {
@@ -1404,7 +1484,7 @@ describe("ResearchSessionInteractiveService", () => {
         signal: null,
       },
     });
-    expect(result.finalized.session.status).toBe("awaiting_resume");
+    expect(result.finalized.session.status).toBe("failed");
   });
 
   it("starts a fresh Codex session when the persisted lifecycle is live but no longer attachable", async () => {
@@ -1505,7 +1585,7 @@ describe("ResearchSessionInteractiveService", () => {
         signal: null,
       },
     });
-    expect(result.finalized.session.status).toBe("awaiting_resume");
+    expect(result.finalized.session.status).toBe("failed");
   });
 
   it("reuses the same persisted Codex session after checkpointing a completed cycle boundary", async () => {

@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rename, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 
 import {
@@ -36,6 +36,11 @@ export class JsonFileResearchSessionRepository implements ResearchSessionReposit
 
   public async loadSession(sessionId: string): Promise<ResearchSessionRecord | null> {
     return this.readSessionRecord(sessionId);
+  }
+
+  public async deleteSession(sessionId: string): Promise<void> {
+    const path = join(this.getSessionsRoot(), sessionId);
+    await rm(path, { recursive: true, force: true });
   }
 
   public async loadSessionMetadata(sessionId: string): Promise<ResearchSessionMetadata | null> {

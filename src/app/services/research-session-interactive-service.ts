@@ -5,6 +5,7 @@ import {
   CodexCliSessionManager,
   type CodexCliSessionHandle,
 } from "../../adapters/proposer/codex-cli-session-manager.js";
+import { JsonFileResearchSessionRepository } from "../../adapters/fs/json-file-research-session-repository.js";
 import { DEFAULT_STORAGE_ROOT } from "../../core/manifest/defaults.js";
 import { type CodexCliSessionLifecyclePhase } from "../../core/model/codex-cli-session-lifecycle.js";
 import {
@@ -78,6 +79,7 @@ export class ResearchSessionInteractiveService {
       session: started.session,
       orchestrator,
     });
+    await deleteDraftSession(canonicalRepoRoot, input.draftSessionId);
 
     return {
       sessionId: started.session.sessionId,
@@ -179,10 +181,10 @@ export class ResearchSessionInteractiveService {
         const lifecyclePathForRecord = toWorkspaceRelativePath(input.repoRoot, lifecyclePath);
         const result =
           exit.code === 0 && exit.signal === null
-            ? await input.orchestrator.recordInterruption({
+            ? await input.orchestrator.failSession({
                 repoRoot: input.repoRoot,
                 sessionId: input.session.sessionId,
-                note: `Codex CLI session exited cleanly before cycle ${input.session.progress.nextCycle} completed. Lifecycle evidence: ${lifecyclePathForRecord}`,
+                message: `Codex CLI session exited cleanly before explicitly completing the research session. Lifecycle evidence: ${lifecyclePathForRecord}`,
               })
             : exit.signal
               ? await input.orchestrator.recordInterruption({
@@ -410,4 +412,9 @@ async function persistReplacementLifecycleRelease(input: {
     ...(lifecycle.error ? { error: lifecycle.error } : {}),
     attachmentStatus: "released",
   });
+}
+
+async function deleteDraftSession(repoRoot: string, draftSessionId: string): Promise<void> {
+  const repository = new JsonFileResearchSessionRepository(join(repoRoot, DEFAULT_STORAGE_ROOT, "sessions"));
+  await repository.deleteSession?.(draftSessionId);
 }

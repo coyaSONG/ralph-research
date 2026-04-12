@@ -486,8 +486,10 @@ export const openResearchSessionShell: ResearchSessionShell = async (
           io.stdout(`Lifecycle evidence: ${launchResult.lifecyclePath}`);
           if (launchResult.finalized.step === "session_interrupted") {
             io.stdout("Session ended before a completed cycle checkpoint and is awaiting resume.");
+          } else if (launchResult.finalized.step === "session_completed") {
+            io.stdout("Session reached goal_achieved and closed cleanly.");
           } else {
-            io.stdout("Session failed before reaching a completed cycle checkpoint.");
+            io.stdout("Session ended without a resumable checkpoint.");
           }
           return;
         } catch (error) {

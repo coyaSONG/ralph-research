@@ -25,6 +25,7 @@ export interface PersistedResearchSessionBundle {
 export interface ResearchSessionRepository {
   saveSession(record: ResearchSessionRecord): Promise<void>;
   loadSession(sessionId: string): Promise<ResearchSessionRecord | null>;
+  deleteSession?(sessionId: string): Promise<void>;
   loadSessionMetadata?(sessionId: string): Promise<ResearchSessionMetadata | null>;
   loadPersistedSession?(sessionId: string): Promise<PersistedResearchSessionBundle | null>;
   querySessionMetadata?(query?: ResearchSessionQuery): Promise<ResearchSessionMetadata[]>;

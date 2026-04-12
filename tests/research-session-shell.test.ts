@@ -656,7 +656,7 @@ describe("openResearchSessionShell", () => {
           step: "session_started" as const,
         },
         finalized: {
-          step: "session_interrupted" as const,
+          step: "session_failed" as const,
         },
       })),
     };
