@@ -37,7 +37,7 @@ export function createProgram(dependencies: CliDependencies = {}): Command {
   program
     .name("rrx")
     .description("Local-first runtime for recursive research improvement.")
-    .version("0.1.2")
+    .version("0.1.3")
     .argument("[goal]", "Goal to pursue through the v1 TUI research orchestrator")
     .action(async (goal?: string) => {
       if (goal === undefined) {

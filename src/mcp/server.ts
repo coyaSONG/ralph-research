@@ -43,7 +43,7 @@ export function createRalphResearchMcpServer(
     (() => new ResearchSessionRecoveryService());
   const server = new McpServer({
     name: "ralph-research",
-    version: "0.1.2",
+    version: "0.1.3",
   });
 
   server.registerTool(
