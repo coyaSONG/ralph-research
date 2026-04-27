@@ -1,4 +1,4 @@
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -63,6 +63,71 @@ describe("lockfile", () => {
     expect(metadata).not.toBeNull();
     expect(metadata?.token).toBe(handle.metadata.token);
     expect(metadata?.token).not.toBe("stale-token");
+  });
+
+  it("allows only one concurrent takeover of a stale lock", async () => {
+    const lockPath = join(tempRoot, ".ralph", "lock");
+    await mkdir(dirname(lockPath), { recursive: true });
+    await writeFile(
+      lockPath,
+      `${JSON.stringify(
+        {
+          pid: 999_999,
+          token: "stale-token",
+          createdAt: "2020-01-01T00:00:00.000Z",
+          updatedAt: "2020-01-01T00:00:00.000Z",
+          ttlMs: 10_000,
+        },
+        null,
+        2,
+      )}\n`,
+      "utf8",
+    );
+
+    const attempts = await Promise.allSettled(
+      Array.from({ length: 8 }, () => acquireLock(lockPath, { ttlMs: 10_000 })),
+    );
+    const successes = attempts.filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof acquireLock>>> => result.status === "fulfilled");
+    const failures = attempts.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+
+    expect(successes).toHaveLength(1);
+    expect(failures).toHaveLength(7);
+    expect((await readLockMetadata(lockPath))?.token).toBe(successes[0]!.value.metadata.token);
+
+    await releaseLock(lockPath, successes[0]!.value.metadata.token);
+  });
+
+  it("recovers an orphaned stale mutation guard", async () => {
+    const lockPath = join(tempRoot, ".ralph", "lock");
+    const guardPath = `${lockPath}.guard`;
+    await mkdir(guardPath, { recursive: true });
+    await utimes(guardPath, new Date("2020-01-01T00:00:00.000Z"), new Date("2020-01-01T00:00:00.000Z"));
+
+    const handle = await acquireLock(lockPath);
+
+    expect((await readLockMetadata(lockPath))?.token).toBe(handle.metadata.token);
+    await expect(pathExists(guardPath)).resolves.toBe(false);
+
+    await releaseLock(lockPath, handle.metadata.token);
+  });
+
+  it("allows only one concurrent acquisition after stale mutation guard cleanup", async () => {
+    const lockPath = join(tempRoot, ".ralph", "lock");
+    const guardPath = `${lockPath}.guard`;
+    await mkdir(guardPath, { recursive: true });
+    await utimes(guardPath, new Date("2020-01-01T00:00:00.000Z"), new Date("2020-01-01T00:00:00.000Z"));
+
+    const attempts = await Promise.allSettled(
+      Array.from({ length: 8 }, () => acquireLock(lockPath)),
+    );
+    const successes = attempts.filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof acquireLock>>> => result.status === "fulfilled");
+    const failures = attempts.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+
+    expect(successes).toHaveLength(1);
+    expect(failures).toHaveLength(7);
+    expect((await readLockMetadata(lockPath))?.token).toBe(successes[0]!.value.metadata.token);
+
+    await releaseLock(lockPath, successes[0]!.value.metadata.token);
   });
 
   it("renews a lease heartbeat before ttl expiry and keeps the lock non-stale", async () => {

@@ -61,6 +61,27 @@ describe("RunCycleService integration", () => {
     expect(committedPaths.trim().split("\n")).toEqual(["docs/draft.md"]);
   });
 
+  it("uses manifest storage root for run state and locks", async () => {
+    const repoRoot = await initFixtureRepo("numeric");
+    await writeFile(
+      join(repoRoot, "ralph.yaml"),
+      (await readFile(join(repoRoot, "ralph.yaml"), "utf8")).replace("root: .ralph", "root: .rrx"),
+      "utf8",
+    );
+    const service = new RunCycleService();
+
+    const result = await service.run({ repoRoot });
+
+    expect(result.status).toBe("accepted");
+    expect(result.lockPath).toBe(join(repoRoot, ".rrx", "lock"));
+    expect(await pathExists(join(repoRoot, ".rrx", "runs", "run-0001.json"))).toBe(true);
+    expect(await pathExists(join(repoRoot, ".rrx", "decisions", "decision-run-0001.json"))).toBe(true);
+    expect(await pathExists(join(repoRoot, ".rrx", "frontier.json"))).toBe(true);
+    expect(await pathExists(join(repoRoot, ".rrx", "lock"))).toBe(false);
+    expect(await pathExists(join(repoRoot, ".ralph", "lock"))).toBe(false);
+    expect(await pathExists(join(repoRoot, ".ralph", "runs"))).toBe(false);
+  });
+
   it("runs a rejected cycle when the frontier incumbent is better", async () => {
     const repoRoot = await initFixtureRepo("numeric");
     const frontierStore = new JsonFileFrontierStore(join(repoRoot, ".ralph", "frontier.json"));

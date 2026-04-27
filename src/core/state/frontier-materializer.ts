@@ -1,3 +1,5 @@
+import { ZodError } from "zod";
+
 import type { RalphManifest } from "../manifest/schema.js";
 import type { DecisionRecord } from "../model/decision-record.js";
 import type { FrontierEntry } from "../model/frontier-entry.js";
@@ -5,11 +7,14 @@ import type { RunRecord } from "../model/run-record.js";
 import type { FrontierStore } from "../ports/frontier-store.js";
 import { buildAcceptedFrontierEntry, updateAcceptedFrontier } from "./frontier-semantics.js";
 
+export type FrontierMaterializationMode = "read_only" | "repair";
+
 export async function materializeFrontier(input: {
   manifest: RalphManifest;
   frontierStore: FrontierStore;
   runs: RunRecord[];
   decisions: DecisionRecord[];
+  mode: FrontierMaterializationMode;
 }): Promise<FrontierEntry[]> {
   const hasDurableAcceptedDecisions = input.decisions.some((decision) => decision.outcome === "accepted" && decision.commitSha);
   const rebuilt = rebuildFrontierFromRecords(input.manifest, input.runs, input.decisions);
@@ -22,8 +27,14 @@ export async function materializeFrontier(input: {
     if (!hasDurableAcceptedDecisions && rebuilt.length === 0 && snapshot.length > 0) {
       return snapshot;
     }
-  } catch {
-    // Rebuild below from durable records.
+  } catch (error) {
+    if (!isRebuildableFrontierSnapshotError(error)) {
+      throw error;
+    }
+  }
+
+  if (input.mode === "read_only") {
+    return rebuilt;
   }
 
   await input.frontierStore.save(rebuilt);
@@ -70,6 +81,10 @@ export function rebuildFrontierFromRecords(
   }
 
   return frontier;
+}
+
+function isRebuildableFrontierSnapshotError(error: unknown): boolean {
+  return error instanceof SyntaxError || error instanceof ZodError;
 }
 
 function frontiersMatch(current: FrontierEntry[], rebuilt: FrontierEntry[]): boolean {

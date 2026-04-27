@@ -36,13 +36,12 @@ export class RunLoopService {
   public async run(input: RunLoopServiceInput): Promise<RunLoopServiceResult> {
     const repoRoot = resolve(input.repoRoot);
     const manifestPath = resolve(repoRoot, input.manifestPath ?? DEFAULT_MANIFEST_FILENAME);
+    validatePositiveIntegerOption(input.cycles, "--cycles");
+    validatePositiveIntegerOption(input.untilNoImprove, "--until-no-improve");
+
     const progressiveMode = Boolean(input.untilTarget) || input.untilNoImprove !== undefined;
     const exactCycles = progressiveMode ? null : input.cycles ?? 1;
     const maxCycles = progressiveMode ? input.cycles ?? null : exactCycles;
-
-    if (input.untilNoImprove !== undefined && input.untilNoImprove < 1) {
-      throw new Error("--until-no-improve requires a positive integer");
-    }
 
     const manifestState = await loadManifestState(repoRoot, manifestPath);
     const warnings = new Set<string>();
@@ -173,6 +172,7 @@ async function loadManifestState(repoRoot: string, manifestPath: string): Promis
     frontierStore,
     runs: await runStore.list(),
     decisions: await decisionStore.list(),
+    mode: "read_only",
   });
 
   return {
@@ -181,6 +181,16 @@ async function loadManifestState(repoRoot: string, manifestPath: string): Promis
       ? { targetStatus: evaluateStoppingTarget(loadedManifest.manifest, frontier) }
       : {}),
   };
+}
+
+function validatePositiveIntegerOption(value: number | undefined, label: string): void {
+  if (value === undefined) {
+    return;
+  }
+
+  if (!Number.isSafeInteger(value) || value < 1) {
+    throw new Error(`${label} requires a positive integer`);
+  }
 }
 
 function buildMaxCycleStopReason(

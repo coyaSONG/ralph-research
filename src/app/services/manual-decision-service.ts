@@ -6,7 +6,6 @@ import { JsonFileRunStore } from "../../adapters/fs/json-file-run-store.js";
 import { acquireLock, releaseLock } from "../../adapters/fs/lockfile.js";
 import { loadManifestFromFile } from "../../adapters/fs/manifest-loader.js";
 import { GitClient } from "../../adapters/git/git-client.js";
-import { DEFAULT_STORAGE_ROOT } from "../../core/manifest/defaults.js";
 import { DEFAULT_MANIFEST_FILENAME } from "../../core/manifest/schema.js";
 import type { DecisionRecord } from "../../core/model/decision-record.js";
 import type { FrontierEntry } from "../../core/model/frontier-entry.js";
@@ -40,12 +39,17 @@ export class ManualDecisionService {
   public async accept(input: ManualDecisionInput): Promise<ManualDecisionResult> {
     const repoRoot = resolve(input.repoRoot);
     const manifestPath = resolve(repoRoot, input.manifestPath ?? DEFAULT_MANIFEST_FILENAME);
-    const lockPath = join(repoRoot, DEFAULT_STORAGE_ROOT, "lock");
-    const lock = await acquireLock(lockPath);
+    const { manifest } = await loadManifestFromFile(manifestPath, { repoRoot });
+    const storageRoot = join(repoRoot, manifest.storage.root);
+    const lockPath = join(storageRoot, "lock");
+    const lock = await acquireLock(lockPath, {
+      owner: {
+        operation: "manual-decision",
+        runId: input.runId,
+      },
+    });
 
     try {
-      const { manifest } = await loadManifestFromFile(manifestPath);
-      const storageRoot = join(repoRoot, manifest.storage.root);
       const runStore = new JsonFileRunStore(join(storageRoot, "runs"));
       const decisionStore = new JsonFileDecisionStore(join(storageRoot, "decisions"));
       const frontierStore = new JsonFileFrontierStore(join(storageRoot, "frontier.json"));
@@ -61,6 +65,7 @@ export class ManualDecisionService {
         frontierStore,
         runs,
         decisions,
+        mode: "repair",
       });
       const decisionCreatedAt = new Date().toISOString();
       const runDir = join(storageRoot, "runs", run.runId);
@@ -153,12 +158,17 @@ export class ManualDecisionService {
   public async reject(input: ManualDecisionInput): Promise<ManualDecisionResult> {
     const repoRoot = resolve(input.repoRoot);
     const manifestPath = resolve(repoRoot, input.manifestPath ?? DEFAULT_MANIFEST_FILENAME);
-    const lockPath = join(repoRoot, DEFAULT_STORAGE_ROOT, "lock");
-    const lock = await acquireLock(lockPath);
+    const { manifest } = await loadManifestFromFile(manifestPath, { repoRoot });
+    const storageRoot = join(repoRoot, manifest.storage.root);
+    const lockPath = join(storageRoot, "lock");
+    const lock = await acquireLock(lockPath, {
+      owner: {
+        operation: "manual-decision",
+        runId: input.runId,
+      },
+    });
 
     try {
-      const { manifest } = await loadManifestFromFile(manifestPath);
-      const storageRoot = join(repoRoot, manifest.storage.root);
       const runStore = new JsonFileRunStore(join(storageRoot, "runs"));
       const decisionStore = new JsonFileDecisionStore(join(storageRoot, "decisions"));
       const frontierStore = new JsonFileFrontierStore(join(storageRoot, "frontier.json"));
@@ -173,6 +183,7 @@ export class ManualDecisionService {
         frontierStore,
         runs,
         decisions,
+        mode: "repair",
       });
       const decisionCreatedAt = new Date().toISOString();
 

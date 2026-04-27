@@ -151,6 +151,41 @@ describe("CLI program goal launch routing", () => {
     expect(resumeCommand).not.toHaveBeenCalled();
   });
 
+  it("rejects invalid run count options before invoking the run handler", async () => {
+    const stderrWrite = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    try {
+      for (const args of [
+        ["run", "--cycles", "0"],
+        ["run", "--cycles", "1.5"],
+        ["run", "--cycles", "abc"],
+        ["run", "--cycles", "1abc"],
+        ["run", "--until-no-improve", "0"],
+        ["run", "--until-no-improve", "1abc"],
+      ]) {
+        const launchCommand = vi.fn(async () => 0);
+        const resumeCommand = vi.fn(async () => 0);
+        const runCommand = vi.fn(async () => 0);
+        const program = createProgram({
+          launchCommand,
+          resumeCommand,
+          runCommand,
+        });
+        program.exitOverride();
+        program.configureOutput({
+          writeErr: () => undefined,
+          writeOut: () => undefined,
+          outputError: () => undefined,
+        });
+
+        await expect(program.parseAsync(["node", "rrx", ...args])).rejects.toThrow();
+        expect(runCommand).not.toHaveBeenCalled();
+      }
+    } finally {
+      stderrWrite.mockRestore();
+    }
+  });
+
   it("registers the resume subcommand and passes the session id through unchanged", async () => {
     process.chdir(tempRoot);
     const launchCommand = vi.fn(async () => 0);

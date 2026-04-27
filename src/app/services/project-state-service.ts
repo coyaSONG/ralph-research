@@ -5,7 +5,6 @@ import { JsonFileFrontierStore } from "../../adapters/fs/json-file-frontier-stor
 import { JsonFileRunStore } from "../../adapters/fs/json-file-run-store.js";
 import { inspectLock, type LockRuntimeState } from "../../adapters/fs/lockfile.js";
 import { loadManifestFromFile } from "../../adapters/fs/manifest-loader.js";
-import { DEFAULT_STORAGE_ROOT } from "../../core/manifest/defaults.js";
 import { DEFAULT_MANIFEST_FILENAME } from "../../core/manifest/schema.js";
 import { summarizeMetricDiagnostics } from "../../core/model/metric-diagnostics.js";
 import type { DecisionRecord } from "../../core/model/decision-record.js";
@@ -97,6 +96,7 @@ export async function getProjectStatus(input: ProjectStateInput): Promise<Projec
     frontierStore,
     runs,
     decisions,
+    mode: "read_only",
   });
   const latestRun = runs.at(-1) ?? null;
   const latestDecision = latestRun?.decisionId
@@ -139,6 +139,7 @@ export async function getProjectFrontier(input: ProjectStateInput): Promise<{
       frontierStore,
       runs,
       decisions,
+      mode: "read_only",
     }),
   };
 }
@@ -158,6 +159,7 @@ export async function inspectRun(input: ProjectStateInput & { runId: string }): 
     frontierStore,
     runs,
     decisions,
+    mode: "read_only",
   });
 
   const judgeRationales = Object.values(run.metrics)
@@ -231,13 +233,13 @@ export async function inspectRun(input: ProjectStateInput & { runId: string }): 
 async function loadProjectStores(input: ProjectStateInput) {
   const repoRoot = resolve(input.repoRoot);
   const manifestPath = resolve(repoRoot, input.manifestPath ?? DEFAULT_MANIFEST_FILENAME);
-  const loadedManifest = await loadManifestFromFile(manifestPath);
+  const loadedManifest = await loadManifestFromFile(manifestPath, { repoRoot });
   const storageRoot = join(repoRoot, loadedManifest.manifest.storage.root);
 
   return {
     manifestPath: loadedManifest.path,
     manifest: loadedManifest.manifest,
-    lockPath: join(repoRoot, DEFAULT_STORAGE_ROOT, "lock"),
+    lockPath: join(storageRoot, "lock"),
     runStore: new JsonFileRunStore(join(storageRoot, "runs")),
     decisionStore: new JsonFileDecisionStore(join(storageRoot, "decisions")),
     frontierStore: new JsonFileFrontierStore(join(storageRoot, "frontier.json")),

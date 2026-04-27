@@ -1,4 +1,4 @@
-import type { Command } from "commander";
+import { InvalidArgumentError, type Command } from "commander";
 
 import { RunLoopService } from "../../app/services/run-loop-service.js";
 
@@ -84,6 +84,19 @@ export async function runRunCommand(
   }
 }
 
+function parsePositiveIntegerOption(value: string): number {
+  if (!/^[1-9]\d*$/.test(value)) {
+    throw new InvalidArgumentError("requires a positive integer");
+  }
+
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) {
+    throw new InvalidArgumentError("requires a positive integer");
+  }
+
+  return parsed;
+}
+
 export function registerRunCommand(
   program: Command,
   executeRunCommand: typeof runRunCommand = runRunCommand,
@@ -92,9 +105,9 @@ export function registerRunCommand(
     .command("run")
     .description("Run one or more research cycles or keep iterating until a stop condition is met.")
     .option("-p, --path <path>", "Path to the manifest file")
-    .option("-c, --cycles <count>", "Exact cycle count, or a max-cycle cap when used with progressive stop flags", (value) => Number.parseInt(value, 10))
+    .option("-c, --cycles <count>", "Exact cycle count, or a max-cycle cap when used with progressive stop flags", parsePositiveIntegerOption)
     .option("--until-target", "Keep running until manifest.stopping.target is met", false)
-    .option("--until-no-improve <count>", "Stop after N consecutive cycles without frontier improvement", (value) => Number.parseInt(value, 10))
+    .option("--until-no-improve <count>", "Stop after N consecutive cycles without frontier improvement", parsePositiveIntegerOption)
     .option("--fresh", "Start a fresh run instead of auto-resuming the latest recoverable run", false)
     .option("--json", "Emit machine-readable output", false)
     .action(async (options: RunCommandOptions) => {

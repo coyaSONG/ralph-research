@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -9,7 +9,7 @@ import { JsonFileDecisionStore } from "../src/adapters/fs/json-file-decision-sto
 import { JsonFileFrontierStore } from "../src/adapters/fs/json-file-frontier-store.js";
 import { JsonFileRunStore } from "../src/adapters/fs/json-file-run-store.js";
 import { ManualDecisionService } from "../src/app/services/manual-decision-service.js";
-import { getProjectStatus, inspectRun } from "../src/app/services/project-state-service.js";
+import { getProjectFrontier, getProjectStatus, inspectRun } from "../src/app/services/project-state-service.js";
 import { GitWorktreeWorkspaceManager } from "../src/core/engine/workspace-manager.js";
 import type { DecisionRecord } from "../src/core/model/decision-record.js";
 import type { RunRecord } from "../src/core/model/run-record.js";
@@ -216,7 +216,7 @@ describe("project-state-service recovery read model", () => {
     expect(result.explainability.metricDeltas[0]?.sourceMetricId).toBe("overfit_safe_exact_rate");
   });
 
-  it("rebuilds frontier state from accepted records when the snapshot is missing", async () => {
+  it("returns rebuilt frontier state from accepted records without writing a missing snapshot", async () => {
     const repoRoot = join(tempRoot, "repo-frontier-rebuild");
     await initNumericFixtureRepo(repoRoot);
     await seedAcceptedFrontierRecord(repoRoot);
@@ -225,9 +225,10 @@ describe("project-state-service recovery read model", () => {
 
     expect(status.frontier).toHaveLength(1);
     expect(status.frontier[0]?.runId).toBe("run-0001");
+    expect(await pathExists(join(repoRoot, ".ralph", "frontier.json"))).toBe(false);
   });
 
-  it("overwrites stale frontier snapshots with rebuilt state", async () => {
+  it("returns rebuilt frontier snapshots without overwriting stale persisted snapshots", async () => {
     const repoRoot = join(tempRoot, "repo-frontier-stale");
     await initNumericFixtureRepo(repoRoot);
     await seedAcceptedFrontierRecord(repoRoot);
@@ -258,10 +259,46 @@ describe("project-state-service recovery read model", () => {
     ]);
 
     const status = await getProjectStatus({ repoRoot });
-    const repairedFrontier = await frontierStore.load();
+    const persistedFrontier = await frontierStore.load();
 
     expect(status.frontier[0]?.runId).toBe("run-0001");
-    expect(repairedFrontier[0]?.runId).toBe("run-0001");
+    expect(persistedFrontier[0]?.runId).toBe("run-stale");
+  });
+
+  it("returns rebuilt frontier without overwriting a malformed persisted snapshot", async () => {
+    const repoRoot = join(tempRoot, "repo-frontier-malformed");
+    await initNumericFixtureRepo(repoRoot);
+    await seedAcceptedFrontierRecord(repoRoot);
+    const frontierPath = join(repoRoot, ".ralph", "frontier.json");
+    await mkdir(join(repoRoot, ".ralph"), { recursive: true });
+    await writeFile(frontierPath, "not json\n", "utf8");
+
+    const status = await getProjectStatus({ repoRoot });
+
+    expect(status.frontier.map((entry) => entry.runId)).toEqual(["run-0001"]);
+    expect(await readFile(frontierPath, "utf8")).toBe("not json\n");
+  });
+
+  it("surfaces non-snapshot IO errors while reading frontier state", async () => {
+    const repoRoot = join(tempRoot, "repo-frontier-io-error");
+    await initNumericFixtureRepo(repoRoot);
+    await seedAcceptedFrontierRecord(repoRoot);
+    await mkdir(join(repoRoot, ".ralph", "frontier.json"), { recursive: true });
+
+    await expect(getProjectStatus({ repoRoot })).rejects.toMatchObject({
+      code: "EISDIR",
+    });
+  });
+
+  it("returns current frontier without writing from the frontier read model", async () => {
+    const repoRoot = join(tempRoot, "repo-frontier-read-model");
+    await initNumericFixtureRepo(repoRoot);
+    await seedAcceptedFrontierRecord(repoRoot);
+
+    const result = await getProjectFrontier({ repoRoot });
+
+    expect(result.frontier.map((entry) => entry.runId)).toEqual(["run-0001"]);
+    expect(await pathExists(join(repoRoot, ".ralph", "frontier.json"))).toBe(false);
   });
 
   it("reports aligned read models after manual accept", async () => {
@@ -329,6 +366,73 @@ describe("project-state-service recovery read model", () => {
     expect(inspect.decision?.outcome).toBe("rejected");
     expect(inspect.frontier.map((entry) => entry.runId)).toEqual(["run-0001"]);
   });
+
+  it("uses manifest storage root for project status locks and state", async () => {
+    const repoRoot = join(tempRoot, "repo-custom-storage-status");
+    await initNumericFixtureRepo(repoRoot);
+    await rewriteStorageRoot(repoRoot, ".rrx");
+    await seedDecisionWrittenRun(repoRoot, {
+      status: "needs_human",
+      decision: makeDecisionRecord({
+        outcome: "needs_human",
+      }),
+    }, ".rrx");
+    const lock = await acquireLock(join(repoRoot, ".rrx", "lock"), {
+      owner: {
+        operation: "run-cycle",
+      },
+    });
+
+    try {
+      const status = await getProjectStatus({ repoRoot });
+
+      expect(status.latestRun?.runId).toBe("run-0001");
+      expect(status.runtime.lockPath).toBe(join(repoRoot, ".rrx", "lock"));
+      expect(status.runtime.state).toBe("stopped");
+      expect(await pathExists(join(repoRoot, ".ralph", "lock"))).toBe(false);
+    } finally {
+      await releaseLock(lock.path, lock.metadata.token);
+    }
+  });
+
+  it("uses manifest storage root for manual decisions", async () => {
+    const repoRoot = join(tempRoot, "repo-custom-storage-manual");
+    await initNumericFixtureRepo(repoRoot);
+    await rewriteStorageRoot(repoRoot, ".rrx");
+    await seedDecisionWrittenRun(repoRoot, {
+      status: "needs_human",
+      decision: makeDecisionRecord({
+        outcome: "needs_human",
+      }),
+    }, ".rrx");
+
+    await new ManualDecisionService().reject({
+      repoRoot,
+      runId: "run-0001",
+      by: "reviewer",
+    });
+
+    const runStore = new JsonFileRunStore(join(repoRoot, ".rrx", "runs"));
+    const decisionStore = new JsonFileDecisionStore(join(repoRoot, ".rrx", "decisions"));
+    expect((await runStore.get("run-0001"))?.status).toBe("rejected");
+    expect((await decisionStore.get("decision-run-0001"))?.outcome).toBe("rejected");
+    expect(await pathExists(join(repoRoot, ".ralph", "lock"))).toBe(false);
+  });
+
+  it("uses repo-aware manifest admission for project status", async () => {
+    const repoRoot = join(tempRoot, "repo-status-admission");
+    await initNumericFixtureRepo(repoRoot);
+    await writeFile(
+      join(repoRoot, "ralph.yaml"),
+      (await readFile(join(repoRoot, "ralph.yaml"), "utf8")).replace("baselineRef: main", "baselineRef: does-not-exist"),
+      "utf8",
+    );
+
+    await expect(getProjectStatus({ repoRoot })).rejects.toMatchObject({
+      name: "ManifestLoadError",
+    });
+    expect(await pathExists(join(repoRoot, ".ralph", "lock"))).toBe(false);
+  });
 });
 
 async function seedProposedRun(repoRoot: string): Promise<void> {
@@ -366,9 +470,10 @@ async function seedDecisionWrittenRun(
     status: "accepted" | "rejected" | "needs_human";
     decision: DecisionRecord;
   },
+  storageRoot = ".ralph",
 ): Promise<void> {
-  const runStore = new JsonFileRunStore(join(repoRoot, ".ralph", "runs"));
-  const decisionStore = new JsonFileDecisionStore(join(repoRoot, ".ralph", "decisions"));
+  const runStore = new JsonFileRunStore(join(repoRoot, storageRoot, "runs"));
+  const decisionStore = new JsonFileDecisionStore(join(repoRoot, storageRoot, "decisions"));
   await decisionStore.put(input.decision);
 
   await runStore.put(
@@ -535,6 +640,24 @@ async function seedPendingHumanReviewRun(
       afterFrontierIds: [],
     }),
   );
+}
+
+async function rewriteStorageRoot(repoRoot: string, storageRoot: string): Promise<void> {
+  const manifestPath = join(repoRoot, "ralph.yaml");
+  await writeFile(
+    manifestPath,
+    (await readFile(manifestPath, "utf8")).replace("root: .ralph", `root: ${storageRoot}`),
+    "utf8",
+  );
+}
+
+async function pathExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function makeRunRecord(overrides: Partial<RunRecord> = {}): RunRecord {

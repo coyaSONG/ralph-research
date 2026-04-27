@@ -11,7 +11,6 @@ import { loadManifestFromFile } from "../../adapters/fs/manifest-loader.js";
 import type { JudgeProvider } from "../../adapters/judge/llm-judge-provider.js";
 import type { CodexCliCycleSessionContext } from "../../core/model/codex-cli-cycle-session.js";
 import { DEFAULT_MANIFEST_FILENAME, type CommandSpecConfig, type RalphManifest } from "../../core/manifest/schema.js";
-import { DEFAULT_STORAGE_ROOT } from "../../core/manifest/defaults.js";
 import { materializeFrontier } from "../../core/state/frontier-materializer.js";
 import { classifyRecovery, type RecoveryStatus } from "../../core/state/recovery-classifier.js";
 import { GitWorktreeWorkspaceManager } from "../../core/engine/workspace-manager.js";
@@ -50,9 +49,10 @@ export class RunCycleService {
   public async run(input: RunCycleServiceInput): Promise<RunCycleServiceResult> {
     const repoRoot = resolve(input.repoRoot);
     const manifestPath = resolve(repoRoot, input.manifestPath ?? DEFAULT_MANIFEST_FILENAME);
-    const lockPath = join(repoRoot, DEFAULT_STORAGE_ROOT, "lock");
     // Run the shared repo-aware admission check before taking locks or mutating storage.
     const loadedManifest = await loadManifestFromFile(manifestPath, { repoRoot });
+    const storageRoot = join(repoRoot, loadedManifest.manifest.storage.root);
+    const lockPath = join(storageRoot, "lock");
     const lock = await acquireLock(lockPath, {
       owner: {
         operation: "run-cycle",
@@ -61,7 +61,6 @@ export class RunCycleService {
     const heartbeat = startLockHeartbeat(lock.path, lock.metadata.token, lock.metadata.ttlMs);
 
     try {
-      const storageRoot = join(repoRoot, loadedManifest.manifest.storage.root);
       const runStore = new JsonFileRunStore(join(storageRoot, "runs"));
       const frontierStore = new JsonFileFrontierStore(join(storageRoot, "frontier.json"));
       const decisionStore = new JsonFileDecisionStore(join(storageRoot, "decisions"));
@@ -74,6 +73,7 @@ export class RunCycleService {
         frontierStore,
         runs,
         decisions,
+        mode: "repair",
       });
       const latestDecision = latestRun?.decisionId
         ? decisions.find((decision) => decision.decisionId === latestRun.decisionId) ?? await decisionStore.get(latestRun.decisionId)
@@ -87,6 +87,10 @@ export class RunCycleService {
       const workspaceWarning = await collectGitWorkspaceCommandWarning(repoRoot, loadedManifest.manifest);
       if (workspaceWarning) {
         warnings.push(workspaceWarning);
+      }
+
+      if (latestRun && recovery.classification === "manual_review_blocked") {
+        throw new Error(`Latest run ${latestRun.runId} is waiting for manual review`);
       }
 
       if (latestRun && !input.fresh) {
@@ -122,10 +126,6 @@ export class RunCycleService {
             recovery,
             ...(warnings.length > 0 ? { warning: warnings.join("\n") } : {}),
           };
-        }
-
-        if (recovery.classification === "manual_review_blocked") {
-          throw new Error(`Latest run ${latestRun.runId} is waiting for manual review`);
         }
 
         if (recovery.classification === "repair_required") {
