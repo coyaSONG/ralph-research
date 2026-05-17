@@ -6,6 +6,19 @@ All notable changes to `ralph-research` are documented here. The format is based
 
 ## [Unreleased]
 
+### Added
+- npm version badge on the README pointing at
+  [`ralph-research` on npm](https://www.npmjs.com/package/ralph-research) now
+  that `v0.1.4` is the published `latest`.
+- Dependabot configuration (`.github/dependabot.yml`) running weekly
+  npm and `github-actions` ecosystem checks with grouped TypeScript/Vitest/MCP
+  updates so dependency drift surfaces as PRs instead of CI surprises.
+
+### Changed
+- CI workflow now uses `actions/checkout@v6` and `actions/setup-node@v6`
+  (Node 24 default), clearing the Node 20 deprecation warning that the first
+  CI run annotated.
+
 ### Fixed
 - `tests/research-session-interactive-service.test.ts` resume-safety regression
   now injects a deterministic `isProcessAlive`, removing a Linux-CI-only
