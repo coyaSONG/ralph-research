@@ -1,0 +1,43 @@
+name: Feature request
+description: Propose a change to the shipped CLI, MCP, or manifest contract.
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The runtime is intentionally narrow today. Proposals that widen the
+        public contract (new CLI commands, new MCP tools, new manifest fields)
+        need a "why this can't live in user-land" answer. See
+        [`docs/comparison.md`](https://github.com/coyaSONG/ralph-research/blob/main/docs/comparison.md)
+        for the trade-offs we've already taken.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What real task can you not finish today, and why does the current contract make it harder than necessary?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Concrete surface area you would add or change. Include CLI flag names, MCP tool names, or YAML keys you have in mind.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What user-land workarounds exist, and why are they insufficient?
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope checks
+      options:
+        - label: I have read `docs/operation-model.md` and `docs/playbook.md`.
+          required: true
+        - label: This proposal does not break existing CLI command names, MCP tool names, or manifest fields.
+          required: false

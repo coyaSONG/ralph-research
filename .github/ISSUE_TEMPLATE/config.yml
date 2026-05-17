@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Operator playbook
+    url: https://github.com/coyaSONG/ralph-research/blob/main/docs/playbook.md
+    about: Situation-to-command guide for the CLI and MCP server.
+  - name: Operation model and recovery semantics
+    url: https://github.com/coyaSONG/ralph-research/blob/main/docs/operation-model.md
+    about: Lifecycle, persisted state, and recovery classifications.
+  - name: FAQ
+    url: https://github.com/coyaSONG/ralph-research/blob/main/docs/faq.md
+    about: Common runtime, recovery, and inspection questions.

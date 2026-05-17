@@ -1,0 +1,70 @@
+name: Bug report
+description: Something the runtime does not do that the contract says it should.
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, please check `docs/operation-model.md` and `docs/faq.md`.
+        If the behavior you see is documented as intentional, this is probably a
+        feature request, not a bug.
+  - type: input
+    id: version
+    attributes:
+      label: ralph-research version
+      description: Output of `rrx --version` (or the `version` field in `package.json` if running from source).
+      placeholder: "0.1.4"
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node.js version
+      description: Output of `node --version`.
+      placeholder: "v24.11.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Linux
+        - WSL2 (Linux on Windows)
+        - Windows (native)
+        - Other (please describe in the steps)
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Exact `rrx` (or MCP) calls. Include the manifest if it is not the bundled `writing` template.
+      render: bash
+      placeholder: |
+        npx github:coyaSONG/ralph-research demo writing
+        # observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What the operation model / playbook says should happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What actually happened. Include the contents of `.ralph/runs/<id>/run.json` and `.ralph/runs/<id>/decision.json` if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or stderr
+      description: Anything from `stderr`, the structured logger output, or `rrx inspect <runId> --json`.
+      render: text
