@@ -12,11 +12,12 @@ concurrency:
 
 jobs:
   verify:
-    name: typecheck + test + build (Node ${{ matrix.node }})
-    runs-on: ubuntu-latest
+    name: ${{ matrix.os }} · Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest]
         node: ["24"]
     steps:
       - name: Checkout
