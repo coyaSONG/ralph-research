@@ -13,8 +13,9 @@ not, so don't oversell.
 1. Confirm the CI badge on the README is green for the latest `main`.
 2. Confirm the most recent `gh release view` matches the version in
    `package.json`.
-3. If you publish to npm, replace the `npx github:coyaSONG/ralph-research`
-   stanzas with the `npx ralph-research ...` form.
+3. Confirm the most recently published npm version
+   (`npm view ralph-research version`) matches the README. The drafts already
+   use the `npx ralph-research ...` form because `v0.1.4+` is on npm.
 4. Pick one target audience per slot; do not cross-post the same draft to
    multiple subreddits in the same hour.
 5. Be present in the comments for the first 90 minutes — that's where stars come

@@ -38,11 +38,11 @@ math.
 
 > 90-second test:
 >
-> `npx github:coyaSONG/ralph-research demo writing`
+> `npx ralph-research demo writing`
 >
 > Creates a disposable Git repo, runs one accepted cycle, prints the path.
-> Then `ls .ralph/runs` to see exactly what got accepted and why. No API key
-> required for the bundled template.
+> Try `npx ralph-research demo code` for the test-pass ratchet. No API key
+> needed for either bundled template.
 
 ## Tweet 5 — ask [222]
 

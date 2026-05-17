@@ -53,7 +53,9 @@ What I deliberately have **not** built:
 If you want to poke at it in 90 seconds:
 
 ```bash
-npx github:coyaSONG/ralph-research demo writing
+npx ralph-research demo writing
+# or, to see the test-pass ratchet on a tiny calculator:
+npx ralph-research demo code
 ```
 
 That creates a disposable Git repo, runs one accepted cycle, and prints the

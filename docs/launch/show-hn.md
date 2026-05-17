@@ -67,8 +67,9 @@ expectations:
 - not a prompt-only protocol — every behavior is grounded in persisted run
   state you can grep
 
-If you only have 90 seconds, run `npx github:coyaSONG/ralph-research demo writing`
-in a scratch directory and look at `.ralph/runs/` afterward.
+If you only have 90 seconds, run `npx ralph-research demo writing` (or
+`npx ralph-research demo code` for the test-pass ratchet) in a scratch
+directory and look at `.ralph/runs/` afterward.
 
 ## Where NOT to post this
 
