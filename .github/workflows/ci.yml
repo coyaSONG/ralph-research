@@ -32,6 +32,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Audit dependencies (fail on high severity or above)
+        run: npm audit --audit-level=high
+
       - name: Typecheck
         run: npm run typecheck
 
