@@ -71,6 +71,14 @@ describe("version consistency", () => {
 
     expect(Array.isArray(parsed.keywords), "package.json must declare keywords array").toBe(true);
     expect((parsed.keywords as string[]).length).toBeGreaterThanOrEqual(4);
+
+    const keywords = parsed.keywords as string[];
+    const unique = new Set(keywords);
+    expect(unique.size, "package.json keywords must not contain duplicates").toBe(keywords.length);
+    for (const keyword of keywords) {
+      expect(keyword, "every keyword must be a non-empty trimmed string").toBe(keyword.trim());
+      expect(keyword.length, "every keyword must be non-empty").toBeGreaterThan(0);
+    }
   });
 
   it("keeps package-lock.json name and version in lockstep with package.json", async () => {
