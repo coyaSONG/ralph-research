@@ -32,6 +32,11 @@ If your viewer does not render Mermaid: the diagram is just the five
 numbered steps above, with every transition writing to durable state under
 `.ralph/`. That's the bit that makes the loop resumable.
 
+> Want a moving picture instead of a flowchart? Run
+> `asciinema rec --command "./scripts/record-demo.sh" docs/assets/demo.cast`
+> against this checkout — the script ships exactly the commands a new user
+> would type and finishes in about sixty seconds.
+
 The current product bar is reliability, not breadth. The bundled success path is the `writing` template, while the runtime itself is manifest-driven and reusable for other local workflows.
 
 ## Trust Signals
