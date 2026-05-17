@@ -224,6 +224,15 @@ npm run typecheck
 npm run build
 ```
 
+## Support the Project
+
+If `ralph-research` saves you from wiring up your own write-evaluate-accept loop:
+
+- Star the repo on [GitHub](https://github.com/coyaSONG/ralph-research). It is the single clearest signal that the runtime is worth maintaining and helps surface it to other people who need the same shape of tool.
+- File issues with concrete reproductions. The issue templates ask for the version, OS, and exact commands so they convert quickly into fixes.
+- Open a PR for the gaps you actually hit. `CONTRIBUTING.md` covers the local loop; the bar is a Vitest regression that fails against the previous code.
+- If you want to talk shape and direction rather than file an issue, the manifest schema (`src/core/manifest/schema.ts`) and the recovery classifier (`src/core/state/research-session-recovery-classifier.ts`) are the two surfaces I most want feedback on.
+
 ## License
 
 MIT
