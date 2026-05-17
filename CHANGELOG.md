@@ -6,17 +6,50 @@ All notable changes to `ralph-research` are documented here. The format is based
 
 ## [Unreleased]
 
+## [0.1.6] - 2026-05-17
+
 ### Added
 - README now embeds a Mermaid flowchart of the write-evaluate-accept loop so
   the mechanism is visible at a glance on GitHub renderings.
 - CI verify matrix now runs on `ubuntu-latest` **and** `macos-latest` so
   platform-specific regressions land as PR failures instead of "works on my
   laptop" stories.
+- `docs/quickstart.md` walks the absolute shortest path from `npx
+  ralph-research demo writing` to inspecting the persisted decision evidence
+  in five minutes.
+- `docs/release-process.md` captures the maintainer release ritual (bump
+  four version literals, promote `[Unreleased]`, commit, push, cut the
+  GitHub release, then `npm publish`).
+- Per-template READMEs under `templates/writing/README.md` and
+  `templates/code/README.md` so users who `rrx init` see the intent of
+  each materialized file.
+- README "Support the Project" section with explicit, no-emoji asks for
+  stars, issues, and PRs.
+- `package.json` now declares `repository`, `bugs`, `homepage`, `engines`,
+  `author`, and a wider `keywords` array. `tests/version-consistency.test.ts`
+  pins those fields so future contributors cannot quietly drop them.
+- `SUPPORTED_DEMO_TEMPLATES` is now an exported constant in
+  `src/cli/commands/demo.ts`. The Commander `<template>` argument surfaces
+  the supported names in `--help`, and a regression in `tests/init-demo.test.ts`
+  fails if a new template forgets to update the help text.
 
 ### Changed
 - `docs/comparison.md` rewritten with a concrete side-by-side table naming
   LangGraph, aider, and the prompt-only "ralph loop" pattern this project is
   named after — including honest "when to pick something else" guidance.
+- `docs/launch/` drafts now use the published `npx ralph-research ...`
+  invocation (the `github:coyaSONG/ralph-research` form was only correct
+  before `v0.1.4` reached npm) and mention the `code` demo alongside the
+  `writing` one.
+- `docs/examples-catalog.md` documents the bundled `code` template as the
+  primary code example while keeping the Python/uv fixture as an
+  alternative shape.
+
+### Fixed
+- `package-lock.json` now reports `name: "ralph-research"` instead of the
+  pre-rename `research-ratchet` placeholder. `tests/version-consistency.test.ts`
+  pins the name and version against `package.json` to prevent the next
+  rename from silently drifting.
 
 ## [0.1.5] - 2026-05-17
 
@@ -94,7 +127,8 @@ record. Highlights:
 - The original `research-ratchet v0.1 MVP` that introduced metric-driven recursive
   improvement.
 
-[Unreleased]: https://github.com/coyaSONG/ralph-research/compare/v0.1.5...HEAD
+[Unreleased]: https://github.com/coyaSONG/ralph-research/compare/v0.1.6...HEAD
+[0.1.6]: https://github.com/coyaSONG/ralph-research/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/coyaSONG/ralph-research/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/coyaSONG/ralph-research/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/coyaSONG/ralph-research/releases/tag/v0.1.3
