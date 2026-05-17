@@ -76,13 +76,18 @@ The current product bar is reliability, not breadth. The bundled success path is
 
 ## Five-Minute Start
 
+For a guided walkthrough that ends with you reading the persisted
+`decision.json` for an accepted cycle, see
+[docs/quickstart.md](docs/quickstart.md). The compressed version:
+
 ### Option A: disposable demo
 
 ```bash
-npx ralph-research demo writing
+npx ralph-research demo writing   # prose ratchet
+npx ralph-research demo code      # test-pass ratchet
 ```
 
-This creates a temporary Git repo, runs one accepted cycle, and prints the temp path plus the run id.
+Either command creates a temporary Git repo, runs one accepted cycle, and prints the temp path plus the run id.
 
 ### Option B: initialize a local repo
 
