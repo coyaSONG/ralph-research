@@ -22,10 +22,12 @@ What to expect:
 
 ## 2. Disposable End-To-End Demo
 
-Use this when you want a temporary repo that proves the loop works without manual setup.
+Use these when you want a temporary repo that proves the loop works without
+manual setup. Both demos finish in seconds and need no API key.
 
 ```bash
-rrx demo writing
+rrx demo writing   # prose ratchet (markdown draft)
+rrx demo code      # test-pass ratchet (tiny JavaScript calculator)
 ```
 
 What to expect:
@@ -33,6 +35,8 @@ What to expect:
 - a temporary Git repo is created
 - one accepted cycle is executed
 - the command prints the temp path and run id
+- `demo code` additionally moves the `tests_passed` metric from `0` to `4`
+  on the bundled `tests/calculator.test.mjs` suite
 
 ## 3. Resume After Interruption
 
@@ -86,9 +90,35 @@ What to expect:
 
 Use the bundled `writing` template when you want a minimal local command metric and a single markdown artifact.
 
-### Code-Oriented Fixture
+### Code (bundled)
 
-Use the code fixture when you want to see a more traditional test-driven shape.
+Use the bundled `code` template when you want a test-pass ratchet with no
+external toolchain — it runs against Node's built-in test runner.
+
+```yaml
+experiment:
+  run:
+    command: "node scripts/experiment.mjs"
+  outputs:
+    - id: test-results
+      path: out/test-results.json
+
+metrics:
+  catalog:
+    - id: tests_passed
+      kind: numeric
+      direction: maximize
+      extractor:
+        type: command
+        command: "node scripts/metric.mjs"
+        parser: plain_number
+```
+
+### Code (Python/uv fixture)
+
+The repo also ships a `tests/fixtures/manifests/valid-code.ralph.yaml`
+fixture that drives the same shape against `uv run pytest`. Reach for it
+when your project's tests already live behind `uv`/`pytest`.
 
 ```yaml
 experiment:
