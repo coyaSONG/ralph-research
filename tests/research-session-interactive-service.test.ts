@@ -340,6 +340,10 @@ describe("ResearchSessionInteractiveService", () => {
       createOrchestrator: () =>
         new ResearchSessionOrchestratorService({
           now: () => new Date("2026-04-12T00:02:10.000Z"),
+          createRecoveryService: () =>
+            new ResearchSessionRecoveryService({
+              isProcessAlive: () => false,
+            }),
         }),
       createSessionManager: () =>
         ({
