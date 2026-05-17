@@ -16,6 +16,22 @@ Local-first runtime for recursive research improvement over real artifacts.
 4. persist the run, decision, and frontier state
 5. promote only verified improvements
 
+```mermaid
+flowchart LR
+    M[Manifest<br/>ralph.yaml] --> P[Proposer]
+    P -->|candidate change<br/>in worktree| E[Experiment]
+    E -->|outputs| X[Metric extractor]
+    X --> R{Ratchet}
+    R -->|wins frontier| A[Accept → main]
+    R -->|else| J[Reject]
+    A -.->|persists| S[(.ralph/<br/>runs · decisions · frontier)]
+    J -.->|persists| S
+```
+
+If your viewer does not render Mermaid: the diagram is just the five
+numbered steps above, with every transition writing to durable state under
+`.ralph/`. That's the bit that makes the loop resumable.
+
 The current product bar is reliability, not breadth. The bundled success path is the `writing` template, while the runtime itself is manifest-driven and reusable for other local workflows.
 
 ## Trust Signals
