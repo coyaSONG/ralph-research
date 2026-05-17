@@ -181,6 +181,7 @@ npx ralph-research run --until-target --until-no-improve 3 --json
 ## More Docs
 
 - [docs/quickstart.md](docs/quickstart.md): five-minute walkthrough from `npx ralph-research demo writing` to inspecting the persisted decision evidence
+- [docs/troubleshooting.md](docs/troubleshooting.md): common failures and the shortest path to a fix
 - [docs/operation-model.md](docs/operation-model.md): lifecycle, persisted state, recovery classes
 - [docs/playbook.md](docs/playbook.md): situation-to-command operator guide
 - [docs/examples.md](docs/examples.md): quickstart and manifest examples pulled from shipped templates and fixtures
