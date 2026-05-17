@@ -1,0 +1,57 @@
+schemaVersion: "0.1"
+
+project:
+  name: code-demo
+  artifact: code
+  baselineRef: main
+  workspace: git
+
+scope:
+  allowedGlobs:
+    - "src/**"
+    - "tests/**"
+    - "out/**"
+  maxFilesChanged: 2
+  maxLineDelta: 40
+
+proposer:
+  type: command
+  command: "node scripts/propose.mjs"
+
+experiment:
+  run:
+    command: "node scripts/experiment.mjs"
+  outputs:
+    - id: test-results
+      path: out/test-results.json
+
+metrics:
+  catalog:
+    - id: tests_passed
+      kind: numeric
+      direction: maximize
+      extractor:
+        type: command
+        command: "node scripts/metric.mjs"
+        parser: plain_number
+
+constraints: []
+
+frontier:
+  strategy: single_best
+  primaryMetric: tests_passed
+
+ratchet:
+  type: epsilon_improve
+  metric: tests_passed
+  epsilon: 0
+
+# Optional progressive-stop contract:
+# stopping:
+#   target:
+#     metric: tests_passed
+#     op: ">="
+#     value: 4
+
+storage:
+  root: .ralph

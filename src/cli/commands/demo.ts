@@ -31,8 +31,9 @@ export async function runDemoCommand(
   options: DemoCommandOptions,
   io: CommandIO = defaultCommandIO,
 ): Promise<number> {
-  if (template !== "writing") {
-    const message = `Unsupported demo template ${template}; only writing is available in v0.1`;
+  const supportedTemplates = ["writing", "code"] as const;
+  if (!(supportedTemplates as readonly string[]).includes(template)) {
+    const message = `Unsupported demo template ${template}; supported templates: ${supportedTemplates.join(", ")}`;
     if (options.json) {
       io.stderr(JSON.stringify({ ok: false, error: message }, null, 2));
     } else {
@@ -44,7 +45,7 @@ export async function runDemoCommand(
   try {
     const targetDir = options.path
       ? resolve(options.path)
-      : await mkdtemp(join(tmpdir(), "rrx-demo-writing-"));
+      : await mkdtemp(join(tmpdir(), `rrx-demo-${template}-`));
     if (options.force) {
       await rm(targetDir, { recursive: true, force: true });
     }

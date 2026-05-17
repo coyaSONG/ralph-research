@@ -7,6 +7,11 @@ All notable changes to `ralph-research` are documented here. The format is based
 ## [Unreleased]
 
 ### Added
+- Second bundled template, `code`, demonstrating a test-pass ratchet on a tiny
+  calculator module. `rrx demo code` now works end-to-end on a fresh checkout
+  and runs one accepted cycle that promotes `tests_passed` from `0` to `4`.
+- `tests/init-demo.test.ts` regressions covering `rrx demo code` (accepted run
+  contract) and the explicit "unsupported demo template" error path.
 - npm version badge on the README pointing at
   [`ralph-research` on npm](https://www.npmjs.com/package/ralph-research) now
   that `v0.1.4` is the published `latest`.

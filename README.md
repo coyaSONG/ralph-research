@@ -45,8 +45,8 @@ The current product bar is reliability, not breadth. The bundled success path is
 | If you want to... | Use |
 | --- | --- |
 | Check whether a repo is runnable | `rrx validate` then `rrx doctor` |
-| Materialize the bundled example project | `rrx init --template writing` |
-| Run a disposable end-to-end demo | `rrx demo writing` |
+| Materialize the bundled example project | `rrx init --template writing` (or `--template code`) |
+| Run a disposable end-to-end demo | `rrx demo writing` (or `rrx demo code`) |
 | Launch the v1 goal-driven orchestrator | `rrx "improve the holdout top-3 model"` |
 | Launch the v1 goal-driven orchestrator explicitly | `rrx launch "improve the holdout top-3 model"` |
 | Resume a persisted TUI research session | `rrx resume latest` |
@@ -104,7 +104,7 @@ See [docs/operation-model.md](docs/operation-model.md) for the full lifecycle an
 
 ## Current Scope
 
-- Bundled template: `writing`
+- Bundled templates: `writing` (prose ratchet) and `code` (test-pass ratchet over a tiny calculator module)
 - Default template metric: local command metric, no API key required
 - Optional judge path: pairwise LLM judge packs
 - MCP tools:
@@ -114,9 +114,11 @@ See [docs/operation-model.md](docs/operation-model.md) for the full lifecycle an
 
 The runtime supports broader manifests than the bundled template demonstrates, but the shipped onboarding path is intentionally narrow until those flows are equally reliable.
 
-## Writing Template
+## Bundled Templates
 
-The bundled writing template is self-contained:
+### Writing template
+
+Self-contained prose improvement loop:
 
 - `docs/draft.md`: sample draft
 - `scripts/propose.mjs`: bounded rewrite
@@ -125,6 +127,18 @@ The bundled writing template is self-contained:
 - `prompts/judge.md`: pairwise judge prompt starter
 
 `templates/writing/ralph.yaml` uses a local command metric by default, so the first run works without model credentials.
+
+### Code template
+
+Self-contained test-pass ratchet over a tiny calculator module:
+
+- `src/calculator.mjs`: deliberately-broken `sum`/`multiply`
+- `tests/calculator.test.mjs`: four assertions using the built-in `node:test` runner
+- `scripts/propose.mjs`: writes the fixed calculator implementation
+- `scripts/experiment.mjs`: runs `node --test --test-reporter=tap` and persists the pass/fail counts
+- `scripts/metric.mjs`: emits the pass count as the `tests_passed` metric
+
+`rrx demo code` materializes the template, runs one cycle, and shows the ratchet promoting the candidate from `tests_passed: 0` to `tests_passed: 4`.
 
 ## Progressive Runs
 

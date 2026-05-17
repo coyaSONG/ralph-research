@@ -70,6 +70,50 @@ describe("init and demo commands", () => {
     expect(payload.inspect.decisionReason.length).toBeGreaterThan(0);
     expect(await readFile(join(targetDir, "docs", "draft.md"), "utf8")).toContain("measurable loop");
   });
+
+  it("runs the zero-config code demo end to end", async () => {
+    const targetDir = join(tempRoot, "code-demo-project");
+    const io = createCapturingIo();
+    const exitCode = await runDemoCommand(
+      "code",
+      {
+        path: targetDir,
+        json: true,
+      },
+      io,
+    );
+
+    expect(exitCode).toBe(0);
+    const payload = JSON.parse(io.stdoutText());
+    expect(payload.ok).toBe(true);
+    expect(payload.template).toBe("code");
+    expect(payload.status).toBe("accepted");
+    expect(payload.runId).toBe("run-0001");
+    expect(typeof payload.inspect.decisionReason).toBe("string");
+    expect(payload.inspect.decisionReason.length).toBeGreaterThan(0);
+    expect(await readFile(join(targetDir, "src", "calculator.mjs"), "utf8")).toContain(
+      "return a + b",
+    );
+  });
+
+  it("rejects an unsupported demo template name with a JSON error", async () => {
+    const io = createCapturingIo();
+    const exitCode = await runDemoCommand(
+      "unknown-template",
+      {
+        path: join(tempRoot, "rejected-project"),
+        json: true,
+      },
+      io,
+    );
+
+    expect(exitCode).toBe(1);
+    const payload = JSON.parse(io.stderrText());
+    expect(payload.ok).toBe(false);
+    expect(payload.error).toContain("Unsupported demo template unknown-template");
+    expect(payload.error).toContain("writing");
+    expect(payload.error).toContain("code");
+  });
 });
 
 function createCapturingIo() {
