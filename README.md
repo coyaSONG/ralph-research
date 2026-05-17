@@ -1,5 +1,10 @@
 # ralph-research
 
+[![CI](https://github.com/coyaSONG/ralph-research/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/coyaSONG/ralph-research/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D24-339933?logo=node.js&logoColor=white)](package.json)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178c6?logo=typescript&logoColor=white)](tsconfig.json)
+
 Local-first runtime for recursive research improvement over real artifacts.
 
 `ralph-research` ships an actual CLI and stdio MCP server that run a bounded loop:
