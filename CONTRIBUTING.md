@@ -69,6 +69,13 @@ The PR template asks for the four things every change needs:
 Small, single-purpose PRs land quickly. Large refactors that touch multiple
 layers will be asked to split.
 
+## Cutting a release
+
+The maintainer release ritual is documented in
+[`docs/release-process.md`](docs/release-process.md). The TL;DR is: bump the
+four version literals, promote `[Unreleased]` in the CHANGELOG, commit via
+`./scripts/committer`, push, cut the GitHub release, then `npm publish`.
+
 ## Security disclosure
 
 See [`SECURITY.md`](SECURITY.md). Do not file public issues for vulnerabilities.
