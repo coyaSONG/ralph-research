@@ -6,6 +6,31 @@ All notable changes to `ralph-research` are documented here. The format is based
 
 ## [Unreleased]
 
+### Added
+- `scripts/record-demo.sh` — reproducible terminal recording script that runs
+  the bundled `code` demo end-to-end in roughly sixty seconds, with a Vitest
+  regression pinning the script's executable bit, bash syntax, and required
+  commands.
+- `tests/readme-link-integrity.test.ts` walks every relative link in the
+  README and CHANGELOG to catch link rot before it reaches the public site.
+- `docs/troubleshooting.md` covers the common installation, scope, recovery,
+  and CI failure modes that come up in practice.
+- CI verify matrix now runs `npm audit --audit-level=high` before typecheck
+  so a transitive `high`-or-higher CVE fails the build instead of slipping
+  through to a release.
+
+### Changed
+- `tests/version-consistency.test.ts` also asserts the npm `keywords` array
+  is unique, trimmed, and non-empty.
+
+### Fixed
+- `npm audit fix` cleared seven transitive vulnerabilities (the vite /
+  postcss / ip-address chain through the dev toolchain). The new
+  audit-level gate prevents a regression.
+- Untracked the stale `spike/day3-cross-domain/runs/code/workspace/tests/__pycache__/test_calculator.cpython-312-pytest-9.0.2.pyc`
+  bytecode file that survived the original `__pycache__` `.gitignore`
+  addition.
+
 ## [0.1.6] - 2026-05-17
 
 ### Added
