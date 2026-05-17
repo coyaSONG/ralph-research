@@ -65,6 +65,7 @@ describe("init and demo commands", () => {
     expect(exitCode).toBe(0);
     const payload = JSON.parse(io.stdoutText());
     expect(payload.ok).toBe(true);
+    expect(payload.template).toBe("writing");
     expect(payload.status).toBe("accepted");
     expect(payload.runId).toBe("run-0001");
     expect(typeof payload.inspect.decisionReason).toBe("string");
