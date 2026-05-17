@@ -44,6 +44,35 @@ describe("version consistency", () => {
     expect(match?.[1]).toBe(expected);
   });
 
+  it("publishes the standard npm metadata fields needed for an honest npmjs.com listing", async () => {
+    const raw = await readFile(resolve(repoRoot, "package.json"), "utf8");
+    const parsed = JSON.parse(raw) as {
+      repository?: { type?: unknown; url?: unknown };
+      bugs?: { url?: unknown };
+      homepage?: unknown;
+      author?: unknown;
+      engines?: { node?: unknown };
+      keywords?: unknown;
+    };
+
+    expect(parsed.repository?.type, "package.json must declare repository.type").toBe("git");
+    expect(typeof parsed.repository?.url, "package.json must declare repository.url").toBe("string");
+    expect(parsed.repository?.url).toMatch(/coyaSONG\/ralph-research(\.git)?$/);
+
+    expect(typeof parsed.bugs?.url, "package.json must declare bugs.url").toBe("string");
+    expect(parsed.bugs?.url).toMatch(/issues$/);
+
+    expect(typeof parsed.homepage, "package.json must declare a homepage URL").toBe("string");
+
+    expect(typeof parsed.author, "package.json must declare author").toBe("string");
+
+    expect(typeof parsed.engines?.node, "package.json must declare engines.node").toBe("string");
+    expect(parsed.engines?.node).toMatch(/>=\s*24/);
+
+    expect(Array.isArray(parsed.keywords), "package.json must declare keywords array").toBe(true);
+    expect((parsed.keywords as string[]).length).toBeGreaterThanOrEqual(4);
+  });
+
   it("keeps package-lock.json name and version in lockstep with package.json", async () => {
     const expected = await loadPackageJson();
     const lockRaw = await readFile(resolve(repoRoot, "package-lock.json"), "utf8");

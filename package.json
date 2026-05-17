@@ -24,9 +24,27 @@
     "research",
     "ratchet",
     "cli",
-    "mcp"
+    "mcp",
+    "agent",
+    "llm",
+    "local-first",
+    "typescript",
+    "nodejs",
+    "codex"
   ],
   "license": "MIT",
+  "author": "coyaSONG",
+  "homepage": "https://github.com/coyaSONG/ralph-research#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/coyaSONG/ralph-research.git"
+  },
+  "bugs": {
+    "url": "https://github.com/coyaSONG/ralph-research/issues"
+  },
+  "engines": {
+    "node": ">=24"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.17.4",
     "commander": "^14.0.1",
