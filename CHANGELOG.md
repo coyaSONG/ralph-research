@@ -6,6 +6,8 @@ All notable changes to `ralph-research` are documented here. The format is based
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-05-17
+
 ### Added
 - Second bundled template, `code`, demonstrating a test-pass ratchet on a tiny
   calculator module. `rrx demo code` now works end-to-end on a fresh checkout
@@ -13,16 +15,21 @@ All notable changes to `ralph-research` are documented here. The format is based
 - `tests/init-demo.test.ts` regressions covering `rrx demo code` (accepted run
   contract) and the explicit "unsupported demo template" error path.
 - npm version badge on the README pointing at
-  [`ralph-research` on npm](https://www.npmjs.com/package/ralph-research) now
-  that `v0.1.4` is the published `latest`.
+  [`ralph-research` on npm](https://www.npmjs.com/package/ralph-research).
 - Dependabot configuration (`.github/dependabot.yml`) running weekly
   npm and `github-actions` ecosystem checks with grouped TypeScript/Vitest/MCP
   updates so dependency drift surfaces as PRs instead of CI surprises.
+- Issue, pull request, security policy, and contributing templates under
+  `.github/` and the repo root, plus a `docs/launch/` set of ready-to-edit
+  Show HN / Reddit / X drafts.
 
 ### Changed
 - CI workflow now uses `actions/checkout@v6` and `actions/setup-node@v6`
   (Node 24 default), clearing the Node 20 deprecation warning that the first
   CI run annotated.
+- `rrx demo` now accepts `writing` or `code` instead of only `writing` and
+  emits the supported-template list in the JSON error payload when the
+  argument is unrecognised.
 
 ### Fixed
 - `tests/research-session-interactive-service.test.ts` resume-safety regression
@@ -75,6 +82,7 @@ record. Highlights:
 - The original `research-ratchet v0.1 MVP` that introduced metric-driven recursive
   improvement.
 
-[Unreleased]: https://github.com/coyaSONG/ralph-research/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/coyaSONG/ralph-research/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/coyaSONG/ralph-research/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/coyaSONG/ralph-research/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/coyaSONG/ralph-research/releases/tag/v0.1.3
