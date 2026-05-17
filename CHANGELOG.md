@@ -6,6 +6,18 @@ All notable changes to `ralph-research` are documented here. The format is based
 
 ## [Unreleased]
 
+### Added
+- README now embeds a Mermaid flowchart of the write-evaluate-accept loop so
+  the mechanism is visible at a glance on GitHub renderings.
+- CI verify matrix now runs on `ubuntu-latest` **and** `macos-latest` so
+  platform-specific regressions land as PR failures instead of "works on my
+  laptop" stories.
+
+### Changed
+- `docs/comparison.md` rewritten with a concrete side-by-side table naming
+  LangGraph, aider, and the prompt-only "ralph loop" pattern this project is
+  named after — including honest "when to pick something else" guidance.
+
 ## [0.1.5] - 2026-05-17
 
 ### Added
