@@ -6,8 +6,9 @@ import { execa } from "execa";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { loadManifestFromFile } from "../src/adapters/fs/manifest-loader.js";
-import { runDemoCommand } from "../src/cli/commands/demo.js";
+import { runDemoCommand, SUPPORTED_DEMO_TEMPLATES } from "../src/cli/commands/demo.js";
 import { runInitCommand } from "../src/cli/commands/init.js";
+import { createProgram } from "../src/cli/program.js";
 
 let tempRoot = "";
 
@@ -94,6 +95,16 @@ describe("init and demo commands", () => {
     expect(await readFile(join(targetDir, "src", "calculator.mjs"), "utf8")).toContain(
       "return a + b",
     );
+  });
+
+  it("advertises every supported template name in the demo command help text", () => {
+    const program = createProgram();
+    const demo = program.commands.find((cmd) => cmd.name() === "demo");
+    expect(demo, "createProgram should register a 'demo' subcommand").toBeDefined();
+    const help = demo!.helpInformation();
+    for (const template of SUPPORTED_DEMO_TEMPLATES) {
+      expect(help, `demo --help must mention template '${template}'`).toContain(template);
+    }
   });
 
   it("rejects an unsupported demo template name with a JSON error", async () => {

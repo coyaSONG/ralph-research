@@ -17,6 +17,9 @@ export interface DemoCommandOptions {
   json?: boolean;
 }
 
+export const SUPPORTED_DEMO_TEMPLATES = ["writing", "code"] as const;
+export type SupportedDemoTemplate = (typeof SUPPORTED_DEMO_TEMPLATES)[number];
+
 const defaultCommandIO: CommandIO = {
   stdout: (message) => {
     process.stdout.write(`${message}\n`);
@@ -31,9 +34,8 @@ export async function runDemoCommand(
   options: DemoCommandOptions,
   io: CommandIO = defaultCommandIO,
 ): Promise<number> {
-  const supportedTemplates = ["writing", "code"] as const;
-  if (!(supportedTemplates as readonly string[]).includes(template)) {
-    const message = `Unsupported demo template ${template}; supported templates: ${supportedTemplates.join(", ")}`;
+  if (!(SUPPORTED_DEMO_TEMPLATES as readonly string[]).includes(template)) {
+    const message = `Unsupported demo template ${template}; supported templates: ${SUPPORTED_DEMO_TEMPLATES.join(", ")}`;
     if (options.json) {
       io.stderr(JSON.stringify({ ok: false, error: message }, null, 2));
     } else {
@@ -116,7 +118,10 @@ export function registerDemoCommand(program: Command): void {
   program
     .command("demo")
     .description("Create and run a zero-config demo.")
-    .argument("<template>", "Demo template name")
+    .argument(
+      "<template>",
+      `Demo template name (one of: ${SUPPORTED_DEMO_TEMPLATES.join(", ")})`,
+    )
     .option("-p, --path <path>", "Destination directory")
     .option("--force", "Replace the destination directory if it already exists", false)
     .option("--json", "Emit machine-readable output", false)
