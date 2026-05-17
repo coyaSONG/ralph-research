@@ -6,6 +6,12 @@ All notable changes to `ralph-research` are documented here. The format is based
 
 ## [Unreleased]
 
+### Fixed
+- `tests/research-session-interactive-service.test.ts` resume-safety regression
+  now injects a deterministic `isProcessAlive`, removing a Linux-CI-only
+  failure where PID 42 happened to be a system process the runner user could
+  not signal and was therefore (correctly) flagged as still alive.
+
 ## [0.1.4] - 2026-05-17
 
 ### Added
