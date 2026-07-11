@@ -21,7 +21,7 @@ jobs:
         node: ["24"]
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           # Full history so manifest fixtures can resolve baselineRef=main
           # when CI runs on a non-main branch (e.g., Dependabot PRs).
