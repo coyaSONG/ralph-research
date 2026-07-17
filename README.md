@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/coyaSONG/ralph-research/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/coyaSONG/ralph-research/actions/workflows/ci.yml)
 [![npm version](https://img.shields.io/npm/v/ralph-research?logo=npm&color=cb3837)](https://www.npmjs.com/package/ralph-research)
+[![npm downloads](https://img.shields.io/npm/dm/ralph-research?logo=npm)](https://www.npmjs.com/package/ralph-research)
+[![GitHub stars](https://img.shields.io/github/stars/coyaSONG/ralph-research?style=flat&logo=github)](https://github.com/coyaSONG/ralph-research/stargazers)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node.js](https://img.shields.io/badge/node-%3E%3D24-339933?logo=node.js&logoColor=white)](package.json)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178c6?logo=typescript&logoColor=white)](tsconfig.json)
@@ -15,6 +17,8 @@ Local-first runtime for recursive research improvement over real artifacts.
 3. evaluate it with trusted signals
 4. persist the run, decision, and frontier state
 5. promote only verified improvements
+
+## How the ratchet works
 
 ```mermaid
 flowchart LR
@@ -31,6 +35,8 @@ flowchart LR
 If your viewer does not render Mermaid: the diagram is just the five
 numbered steps above, with every transition writing to durable state under
 `.ralph/`. That's the bit that makes the loop resumable.
+
+Each candidate runs in an isolated Git worktree. The configured experiment produces evidence, metric extractors normalize it, and the ratchet compares it with the accepted frontier. A crash cannot silently turn an unverified candidate into the new baseline because the run, decision, lock, and frontier records are persisted separately.
 
 > Want a moving picture instead of a flowchart? Run
 > `asciinema rec --command "./scripts/record-demo.sh" docs/assets/demo.cast`
@@ -244,6 +250,7 @@ If `ralph-research` saves you from wiring up your own write-evaluate-accept loop
 - File issues with concrete reproductions. The issue templates ask for the version, OS, and exact commands so they convert quickly into fixes.
 - Open a PR for the gaps you actually hit. `CONTRIBUTING.md` covers the local loop; the bar is a Vitest regression that fails against the previous code.
 - If you want to talk shape and direction rather than file an issue, the manifest schema (`src/core/manifest/schema.ts`) and the recovery classifier (`src/core/state/research-session-recovery-classifier.ts`) are the two surfaces I most want feedback on.
+- See the broader [AI tooling portfolio](https://coyasong.dev/portfolio) for the reliability principles shared with YouTube Research MCP and `tmuxicate`.
 
 ## License
 
